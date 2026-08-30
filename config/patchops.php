@@ -4,6 +4,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Agent ReAct Iteration Ceilings
+    |--------------------------------------------------------------------------
+    |
+    | Maximum step iterations for multi-turn ReAct investigation and repair loops.
+    |
+    */
+
+    'max_triage_steps' => (int) env('MAX_TRIAGE_STEPS', 6),
+
+    /*
+    |--------------------------------------------------------------------------
     | PatchOps Execution Timeouts (in seconds)
     |--------------------------------------------------------------------------
     |
