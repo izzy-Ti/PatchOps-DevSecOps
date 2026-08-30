@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\IncidentPriority;
 use App\Enums\IncidentStatus;
 use App\Enums\VulnerabilitySeverity;
+use App\Exceptions\InvalidIncidentStatusTransitionException;
 use App\Services\AuditLogger;
 use Database\Factories\IncidentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -76,6 +77,96 @@ class Incident extends Model
     }
 
     /**
+     * Transition the incident to a new status with validation and audit logging.
+     *
+     * @throws InvalidIncidentStatusTransitionException
+     */
+    public function transitionTo(IncidentStatus $newStatus, ?string $reason = null): void
+    {
+        $currentStatus = $this->status instanceof IncidentStatus
+            ? $this->status
+            : (IncidentStatus::tryFrom((string) $this->status) ?? IncidentStatus::RECEIVED);
+
+        if (! $currentStatus->canTransitionTo($newStatus)) {
+            throw new InvalidIncidentStatusTransitionException(
+                fromStatus: $currentStatus,
+                toStatus: $newStatus,
+                incidentId: $this->id,
+            );
+        }
+
+        $fromStatus = $currentStatus;
+        $this->status = $newStatus;
+
+        if ($newStatus === IncidentStatus::RESOLVED && $this->resolved_at === null) {
+            $this->resolved_at = now();
+        }
+
+        $this->save();
+
+        AuditLogger::logSystemAction(
+            event: 'incident.status_changed',
+            auditable: $this,
+            payload: [
+                'incident_id' => $this->id,
+                'incident_number' => $this->incident_number,
+                'from_status' => $fromStatus->value,
+                'to_status' => $newStatus->value,
+                'reason' => $reason,
+            ],
+            correlationId: $this->correlation_id,
+        );
+    }
+
+    /**
+     * Scope a query to only include active (non-terminal) incidents.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->whereNotIn('status', [
+            IncidentStatus::RESOLVED,
+            IncidentStatus::CLOSED,
+            IncidentStatus::FAILED,
+        ]);
+    }
+
+    /**
+     * Scope a query to only include incidents awaiting approval.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeAwaitingApproval(Builder $query): Builder
+    {
+        return $query->where('status', IncidentStatus::AWAITING_APPROVAL);
+    }
+
+    /**
+     * Scope a query to only include failed incidents.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeFailed(Builder $query): Builder
+    {
+        return $query->where('status', IncidentStatus::FAILED);
+    }
+
+    /**
+     * Scope a query to only include resolved incidents.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeResolved(Builder $query): Builder
+    {
+        return $query->where('status', IncidentStatus::RESOLVED);
+    }
+
+    /**
      * Scope a query to only include received incidents.
      *
      * @param  Builder<static>  $query
@@ -95,17 +186,6 @@ class Incident extends Model
     public function scopeTriaging(Builder $query): Builder
     {
         return $query->where('status', IncidentStatus::TRIAGING);
-    }
-
-    /**
-     * Scope a query to only include resolved incidents.
-     *
-     * @param  Builder<static>  $query
-     * @return Builder<static>
-     */
-    public function scopeResolved(Builder $query): Builder
-    {
-        return $query->where('status', IncidentStatus::RESOLVED);
     }
 
     /**
