@@ -6,6 +6,9 @@ use App\DTOs\AgentErrorDTO;
 use App\DTOs\AgentResultDTO;
 use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
+use App\Tools\Enums\AgentRole;
+use App\Tools\Gateway\PatchOpsToolGateway;
+use App\Tools\ToolRegistry;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -14,23 +17,35 @@ use Throwable;
 class TriageAgent
 {
     /**
+     * Maximum ReAct loop iteration steps.
+     */
+    public const MAX_REACT_STEPS = 6;
+
+    /**
      * System prompt defining AppSec triage expertise and evaluation guidelines.
      */
     public const SYSTEM_PROMPT = <<<'PROMPT'
 You are an elite Autonomous Application Security (AppSec) Triage Engineer for the PatchOps automated remediation platform.
 
-Your job is to analyze incoming security vulnerabilities, advisory disclosures, dependency manifests, and repository metadata to determine:
-1. Real-world exploitability (remote code execution, data exfiltration, prototype pollution, denial of service).
-2. Production exposure (is this package part of a runtime API/backend service or purely an internal build/dev tool?).
-3. True severity (critical, high, medium, low) based on CVSS and threat vectors.
-4. Remediation priority (critical, high, medium, low) balancing exploitability and blast radius.
-5. Affected software component and concise technical rationale.
-
-You must ALWAYS record your final assessment via the `record_triage_analysis` tool. Be objective, precise, and avoid speculative claims without technical evidence.
+Your mission is to perform an iterative ReAct (Reason + Act) security investigation of the reported vulnerability:
+1. Investigate the repository structure, dependency manifests (e.g. composer.json, package.json), and source files via available GitHub/Repository tools.
+2. Determine real-world exploitability (remote code execution, data exfiltration, prototype pollution, denial of service).
+3. Determine production exposure (is this package part of runtime dependencies or purely build/dev tools?).
+4. Assess true severity (critical, high, medium, low) based on CVSS and threat vectors.
+5. Determine remediation priority (critical, high, medium, low) balancing exploitability and blast radius.
+6. When your investigation is complete, call the `record_triage_analysis` tool to submit your final verdict.
 PROMPT;
 
+    public function __construct(
+        protected ?ToolRegistry $toolRegistry = null,
+        protected ?PatchOpsToolGateway $gateway = null,
+    ) {
+        $this->toolRegistry ??= app(ToolRegistry::class);
+        $this->gateway ??= app(PatchOpsToolGateway::class);
+    }
+
     /**
-     * Analyze an incident using Claude API with forced structured tool calling.
+     * Analyze an incident using Claude API with a multi-turn ReAct investigation loop.
      */
     public function analyze(Incident $incident): AgentResultDTO
     {
@@ -55,9 +70,12 @@ PROMPT;
         $incident->loadMissing('vulnerability');
         $promptContext = $this->buildContext($incident);
 
-        $toolDefinition = [
+        // 1. Compile authorized tool definitions for Triage role
+        $roleTools = $this->toolRegistry->getToolSchemasForRole(AgentRole::TRIAGE);
+
+        $terminalTool = [
             'name' => 'record_triage_analysis',
-            'description' => 'Record security triage analysis, severity, priority, and blast radius for a reported vulnerability.',
+            'description' => 'Submit final security triage analysis, severity, priority, and blast radius after completing repository/manifest investigation.',
             'input_schema' => [
                 'type' => 'object',
                 'properties' => [
@@ -88,69 +106,134 @@ PROMPT;
             ],
         ];
 
-        $payload = [
-            'model' => $model,
-            'max_tokens' => 1024,
-            'system' => self::SYSTEM_PROMPT,
-            'messages' => [
-                [
-                    'role' => 'user',
-                    'content' => $promptContext,
-                ],
-            ],
-            'tools' => [$toolDefinition],
-            'tool_choice' => [
-                'type' => 'tool',
-                'name' => 'record_triage_analysis',
+        $availableTools = array_merge($roleTools, [$terminalTool]);
+
+        $messages = [
+            [
+                'role' => 'user',
+                'content' => $promptContext,
             ],
         ];
 
         try {
-            $response = Http::withHeaders([
-                'x-api-key' => $apiKey,
-                'anthropic-version' => $version,
-                'content-type' => 'application/json',
-            ])->timeout(60)->post('https://api.anthropic.com/v1/messages', $payload);
+            // Multi-Turn ReAct Loop
+            for ($step = 1; $step <= self::MAX_REACT_STEPS; $step++) {
+                $payload = [
+                    'model' => $model,
+                    'max_tokens' => 2048,
+                    'system' => self::SYSTEM_PROMPT,
+                    'messages' => $messages,
+                    'tools' => $availableTools,
+                ];
 
-            $executionTime = round(microtime(true) - $startTime, 3);
+                $response = Http::withHeaders([
+                    'x-api-key' => $apiKey,
+                    'anthropic-version' => $version,
+                    'content-type' => 'application/json',
+                ])->timeout(60)->post('https://api.anthropic.com/v1/messages', $payload);
 
-            if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
-                throw new TransientAgentInfrastructureException("Claude API transient status [{$response->status()}]: {$response->body()}");
-            }
+                $executionTime = round(microtime(true) - $startTime, 3);
 
-            if (! $response->successful()) {
-                Log::error('Anthropic API returned error during triage analysis.', [
-                    'incident_id' => $incident->id,
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
+                if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
+                    throw new TransientAgentInfrastructureException("Claude API transient status [{$response->status()}]: {$response->body()}");
+                }
 
-                return AgentResultDTO::failure(
-                    code: AgentErrorDTO::LLM_API_ERROR,
-                    message: "Anthropic API error: {$response->status()} - {$response->body()}",
-                    details: $response->json() ?? [],
-                    metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => $executionTime],
-                );
-            }
+                if (! $response->successful()) {
+                    Log::error('Anthropic API returned error during triage ReAct turn.', [
+                        'incident_id' => $incident->id,
+                        'step' => $step,
+                        'status' => $response->status(),
+                    ]);
 
-            $responseData = $response->json();
-            $contentBlocks = $responseData['content'] ?? [];
-
-            foreach ($contentBlocks as $block) {
-                if (($block['type'] ?? null) === 'tool_use' && ($block['name'] ?? null) === 'record_triage_analysis') {
-                    $toolInput = $block['input'] ?? [];
-
-                    return AgentResultDTO::success(
-                        data: $toolInput,
+                    return AgentResultDTO::failure(
+                        code: AgentErrorDTO::LLM_API_ERROR,
+                        message: "Anthropic API error: {$response->status()} - {$response->body()}",
+                        details: $response->json() ?? [],
                         metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => $executionTime],
                     );
                 }
+
+                $responseData = $response->json();
+                $contentBlocks = $responseData['content'] ?? [];
+                $stopReason = $responseData['stop_reason'] ?? null;
+
+                // Check for terminal tool call
+                foreach ($contentBlocks as $block) {
+                    if (($block['type'] ?? null) === 'tool_use' && ($block['name'] ?? null) === 'record_triage_analysis') {
+                        $toolInput = $block['input'] ?? [];
+
+                        return AgentResultDTO::success(
+                            data: $toolInput,
+                            metadata: [
+                                'agent' => 'TriageAgent',
+                                'react_steps' => $step,
+                                'execution_time_seconds' => $executionTime,
+                            ],
+                        );
+                    }
+                }
+
+                // If Claude wants to execute intermediate tools
+                if ($stopReason === 'tool_use') {
+                    // Append Assistant Turn
+                    $messages[] = [
+                        'role' => 'assistant',
+                        'content' => $contentBlocks,
+                    ];
+
+                    $toolResultBlocks = [];
+
+                    foreach ($contentBlocks as $block) {
+                        if (($block['type'] ?? null) === 'tool_use') {
+                            $toolUseId = $block['id'];
+                            $toolName = $block['name'];
+                            $toolInput = $block['input'] ?? [];
+
+                            // Route through Tool Gateway
+                            $gatewayResult = $this->gateway->invokeTool(
+                                toolName: $toolName,
+                                arguments: $toolInput,
+                                role: AgentRole::TRIAGE,
+                                incident: $incident,
+                            );
+
+                            $toolResultBlocks[] = [
+                                'type' => 'tool_result',
+                                'tool_use_id' => $toolUseId,
+                                'is_error' => $gatewayResult['is_error'],
+                                'content' => $gatewayResult['is_error']
+                                    ? ($gatewayResult['error'] ?? 'Tool invocation failed')
+                                    : json_encode($gatewayResult['data'], JSON_UNESCAPED_SLASHES),
+                            ];
+                        }
+                    }
+
+                    // Append Tool Result Observations
+                    $messages[] = [
+                        'role' => 'user',
+                        'content' => $toolResultBlocks,
+                    ];
+
+                    continue;
+                }
+
+                // Non-tool response; prompt model to finish triage
+                $messages[] = [
+                    'role' => 'assistant',
+                    'content' => $contentBlocks,
+                ];
+                $messages[] = [
+                    'role' => 'user',
+                    'content' => 'Please conclude your investigation and call record_triage_analysis with your findings.',
+                ];
             }
 
+            $executionTime = round(microtime(true) - $startTime, 3);
+
             return AgentResultDTO::failure(
-                code: AgentErrorDTO::SCHEMA_VALIDATION_FAILED,
-                message: 'Claude API responded without calling the record_triage_analysis tool.',
-                details: $responseData ?? [],
+                code: AgentErrorDTO::MAX_ATTEMPTS_EXCEEDED,
+                message: 'Triage Agent exceeded maximum ReAct investigation steps without concluding.',
+                details: [],
                 metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => $executionTime],
             );
         } catch (ConnectionException $e) {
@@ -160,7 +243,7 @@ PROMPT;
         } catch (Throwable $e) {
             $executionTime = round(microtime(true) - $startTime, 3);
 
-            Log::error('Exception occurred during TriageAgent execution.', [
+            Log::error('Exception occurred during TriageAgent ReAct execution.', [
                 'incident_id' => $incident->id,
                 'exception' => $e->getMessage(),
             ]);

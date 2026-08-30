@@ -1,6 +1,7 @@
 <?php
 
 use App\Tools\MCP\GitHub\CreatePullRequestTool;
+use App\Tools\MCP\GitHub\GetDependencyManifestTool;
 use App\Tools\MCP\GitHub\GetFileTool;
 use App\Tools\MCP\GitHub\GetRepositoryTool;
 use App\Tools\MCP\Repository\InspectStructureTool;
@@ -27,6 +28,7 @@ return [
     'providers' => [
         GetRepositoryTool::class,
         GetFileTool::class,
+        GetDependencyManifestTool::class,
         CreatePullRequestTool::class,
         GetCveTool::class,
         SearchVulnerabilityTool::class,
