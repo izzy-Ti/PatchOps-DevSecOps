@@ -3,11 +3,13 @@
 namespace App\Services\MCP;
 
 use App\Exceptions\MCP\InvalidToolArgumentsException;
+use App\Exceptions\MCP\ResourceAccessDeniedException;
 use App\Exceptions\MCP\UnauthorizedToolException;
 use App\Models\Incident;
 use App\Services\AuditLogger;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\ToolNotFoundException;
+use App\Tools\Permissions\ToolScope;
 use App\Tools\ToolRegistry;
 use Illuminate\Support\Facades\Log;
 
@@ -24,12 +26,13 @@ class MCPToolGateway
     }
 
     /**
-     * Execute a tool through the strict non-bypassable MCP Tool Gateway pipeline.
+     * Execute a tool through the strict non-bypassable MCP Tool Gateway pipeline with ABAC resource constraints.
      *
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
      *
      * @throws UnauthorizedToolException
+     * @throws ResourceAccessDeniedException
      * @throws InvalidToolArgumentsException
      * @throws ToolNotFoundException
      */
@@ -58,18 +61,43 @@ class MCPToolGateway
         }
 
         $tool = $this->registry->get($toolName);
+        $scopeStr = $tool->requiredPermission()->value;
+        $scopeEnum = ToolScope::tryFrom($scopeStr) ?? ToolScope::GITHUB_READ;
 
-        // 3. Validate Input Arguments against Schema
+        // 3. ABAC Resource-Level Constraint Validation
+        try {
+            $this->permissionService->validateResourceConstraints($scopeEnum, $arguments, $context);
+        } catch (ResourceAccessDeniedException $e) {
+            AuditLogger::logSystemAction(
+                event: 'security.resource_access_denied',
+                auditable: $context,
+                payload: [
+                    'tool' => $toolName,
+                    'role' => $role->value,
+                    'scope' => $scopeEnum->value,
+                    'violating_resource' => $e->violatingResource,
+                    'reason' => $e->reason,
+                    'arguments' => $this->redactSensitiveValues($arguments),
+                ],
+                correlationId: $context->correlation_id,
+            );
+
+            Log::critical("Security violation on incident [{$context->incident_number}]: {$e->getMessage()}");
+
+            throw $e;
+        }
+
+        // 4. Validate Input Arguments against Schema
         $this->validateArguments($toolName, $tool->parametersSchema(), $arguments);
 
-        // 4. Monitored Tool Execution
+        // 5. Monitored Tool Execution
         $rawOutput = $tool->execute($arguments, $context);
 
-        // 5. Sanitize, Truncate, and Redact Secrets
+        // 6. Sanitize, Truncate, and Redact Secrets
         $sanitizedOutput = $this->sanitizeResponse($rawOutput);
         $executionTime = round(microtime(true) - $startTime, 3);
 
-        // 6. Record Audit Event
+        // 7. Record Audit Event
         if (config('mcp.security.audit_invocations', true)) {
             AuditLogger::logSystemAction(
                 event: 'mcp_gateway.tool_executed',
