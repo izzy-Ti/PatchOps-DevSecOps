@@ -2,6 +2,7 @@
 
 namespace App\Workflows;
 
+use App\DTOs\PatchResultDTO;
 use App\DTOs\ReproductionResultDTO;
 use App\DTOs\TriageResultDTO;
 use App\Enums\IncidentPriority;
@@ -40,7 +41,6 @@ class IncidentOrchestrator
             IncidentStatus::RECEIVED => TriageIncidentJob::dispatch($incident)->onQueue('incidents'),
             IncidentStatus::PRIORITIZED => ReproduceIncidentJob::dispatch($incident)->onQueue('incidents'),
             IncidentStatus::REPRODUCED => GeneratePatchJob::dispatch($incident)->onQueue('incidents'),
-            IncidentStatus::PATCHING,
             IncidentStatus::VALIDATING => ValidatePatchJob::dispatch($incident)->onQueue('incidents'),
             IncidentStatus::VERIFIED => CreatePullRequestJob::dispatch($incident)->onQueue('incidents'),
             IncidentStatus::FAILED,
@@ -48,6 +48,7 @@ class IncidentOrchestrator
             IncidentStatus::AWAITING_APPROVAL,
             IncidentStatus::TRIAGING,
             IncidentStatus::REPRODUCING,
+            IncidentStatus::PATCHING,
             IncidentStatus::PR_CREATED,
             IncidentStatus::CI_RUNNING,
             IncidentStatus::RESOLVED,
@@ -172,6 +173,54 @@ class IncidentOrchestrator
                 reason: 'Reproduction sandbox error: '.($result->failureReason ?? 'Sandbox environment failed to initialize or execute.'),
                 actorType: 'agent',
                 actorId: 'reproduction-agent',
+                metadata: [
+                    'error' => $result->failureReason,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Handle the structured result from PatchAgent.
+     */
+    public function handlePatchResult(Incident $incident, PatchResultDTO $result): void
+    {
+        if ($result->isValid()) {
+            $incident->root_cause = $result->rootCause;
+            $incident->metadata = array_merge($incident->metadata ?? [], [
+                'fix_summary' => $result->fixSummary,
+                'diff' => $result->diff,
+                'changed_files' => $result->changedFiles,
+                'tests_added' => $result->testsAdded,
+                'patched_at' => now()->toIso8601String(),
+            ]);
+            $incident->save();
+
+            $this->stateMachine->transition(
+                incident: $incident,
+                targetStatus: IncidentStatus::VALIDATING,
+                reason: $result->fixSummary ?? 'Security patch and regression tests synthesized.',
+                actorType: 'agent',
+                actorId: 'patch-agent',
+                metadata: [
+                    'changed_files' => $result->changedFiles,
+                    'tests_added' => $result->testsAdded,
+                ],
+            );
+
+            ValidatePatchJob::dispatch($incident)->onQueue('incidents');
+        } else {
+            $incident->metadata = array_merge($incident->metadata ?? [], [
+                'patch_failure_reason' => $result->failureReason,
+            ]);
+            $incident->save();
+
+            $this->stateMachine->transition(
+                incident: $incident,
+                targetStatus: IncidentStatus::ESCALATED,
+                reason: 'Patch synthesis failed: '.($result->failureReason ?? 'Invalid patch schema or empty diff output.'),
+                actorType: 'agent',
+                actorId: 'patch-agent',
                 metadata: [
                     'error' => $result->failureReason,
                 ],

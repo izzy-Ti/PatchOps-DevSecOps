@@ -35,11 +35,6 @@ test('IncidentOrchestrator routes incident statuses to correct queue jobs', func
     $orchestrator->handle($reproduced);
     Queue::assertPushed(GeneratePatchJob::class, fn ($job) => $job->incident->id === $reproduced->id);
 
-    // PATCHING -> ValidatePatchJob
-    $patching = Incident::factory()->create(['status' => IncidentStatus::PATCHING]);
-    $orchestrator->handle($patching);
-    Queue::assertPushed(ValidatePatchJob::class, fn ($job) => $job->incident->id === $patching->id);
-
     // VALIDATING -> ValidatePatchJob
     $validating = Incident::factory()->create(['status' => IncidentStatus::VALIDATING]);
     $orchestrator->handle($validating);
