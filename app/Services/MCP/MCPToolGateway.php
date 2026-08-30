@@ -3,13 +3,16 @@
 namespace App\Services\MCP;
 
 use App\Exceptions\MCP\ForbiddenHostCapabilityException;
+use App\Exceptions\MCP\HitlApprovalRequiredException;
 use App\Exceptions\MCP\InvalidToolArgumentsException;
 use App\Exceptions\MCP\RepositoryAccessDeniedException;
 use App\Exceptions\MCP\ResourceAccessDeniedException;
 use App\Exceptions\MCP\UnauthorizedCriticalActionException;
 use App\Exceptions\MCP\UnauthorizedToolException;
 use App\Models\Incident;
+use App\Models\ToolExecution;
 use App\Services\AuditLogger;
+use App\Services\MCP\Guards\HitlApprovalGuard;
 use App\Services\MCP\Guards\RepositoryAccessGuard;
 use App\Services\MCP\Guards\SandboxExecutionGuard;
 use App\Services\MCP\Guards\ToolRiskLevelGuard;
@@ -18,6 +21,7 @@ use App\Tools\Exceptions\ToolNotFoundException;
 use App\Tools\Permissions\ToolScope;
 use App\Tools\ToolRegistry;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class MCPToolGateway
 {
@@ -28,6 +32,7 @@ class MCPToolGateway
         protected ?RepositoryAccessGuard $repositoryGuard = null,
         protected ?SandboxExecutionGuard $sandboxGuard = null,
         protected ?ToolRiskLevelGuard $riskLevelGuard = null,
+        protected ?HitlApprovalGuard $hitlGuard = null,
     ) {
         $this->permissionService ??= app(MCPPermissionService::class);
         $this->registry ??= app(ToolRegistry::class);
@@ -35,15 +40,18 @@ class MCPToolGateway
         $this->repositoryGuard ??= app(RepositoryAccessGuard::class);
         $this->sandboxGuard ??= app(SandboxExecutionGuard::class);
         $this->riskLevelGuard ??= app(ToolRiskLevelGuard::class);
+        $this->hitlGuard ??= app(HitlApprovalGuard::class);
     }
 
     /**
-     * Execute a tool through the strict non-bypassable MCP Tool Gateway pipeline with repository & sandbox isolation.
+     * Execute a tool through the strict non-bypassable MCP Tool Gateway pipeline with repository & sandbox isolation,
+     * HITL approval gates, immutable tool execution logging, and zero-trust credential isolation.
      *
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
      *
      * @throws UnauthorizedToolException
+     * @throws HitlApprovalRequiredException
      * @throws ForbiddenHostCapabilityException
      * @throws UnauthorizedCriticalActionException
      * @throws RepositoryAccessDeniedException
@@ -56,6 +64,7 @@ class MCPToolGateway
         string $toolName,
         array $arguments,
         Incident $context,
+        ?int $agentRunId = null,
     ): array {
         $startTime = microtime(true);
 
@@ -65,87 +74,174 @@ class MCPToolGateway
             'role' => $role->value,
         ]);
 
+        $redactedArgs = $this->redactSensitiveValues($arguments);
+
         // 1. Tool Existence Check
         if (! $this->registry->has($toolName)) {
             throw new ToolNotFoundException($toolName);
         }
 
-        // 2. Capability & Role Permission Authorization
-        if (! $this->permissionService->isAllowed($role, $toolName)) {
-            throw new UnauthorizedToolException($role, $toolName);
+        $tool = $this->registry->get($toolName);
+        $permission = $tool->requiredPermission()->value;
+        $riskLevel = $tool->definition()->riskLevel->value;
+
+        // 2. Open running record in tool_executions telemetry
+        $executionRecord = null;
+        try {
+            $executionRecord = ToolExecution::create([
+                'incident_id' => $context->id,
+                'agent_run_id' => $agentRunId,
+                'tool_name' => $toolName,
+                'arguments' => $redactedArgs,
+                'status' => 'running',
+                'permission' => $permission,
+                'risk_level' => $riskLevel,
+                'correlation_id' => $context->correlation_id,
+                'started_at' => now(),
+            ]);
+        } catch (Throwable $e) {
+            Log::warning("Could not persist initial tool_executions record: {$e->getMessage()}");
         }
 
-        // 3. Strict Repository Boundary Isolation Guard
-        $this->repositoryGuard->validate($context, $arguments, $toolName);
-
-        // 4. Sandbox Security Boundary & Breakout Guard
-        $this->sandboxGuard->validate($context, $arguments, $toolName);
-
-        $tool = $this->registry->get($toolName);
-
-        // 5. Multi-Tier Tool Risk Level & HITL Gate Evaluation
-        $this->riskLevelGuard->evaluate($tool, $arguments, $context);
-
-        $scopeStr = $tool->requiredPermission()->value;
-        $scopeEnum = ToolScope::tryFrom($scopeStr) ?? ToolScope::GITHUB_READ;
-
-        // 6. ABAC Resource-Level Constraint Validation
         try {
-            $this->permissionService->validateResourceConstraints($scopeEnum, $arguments, $context);
-        } catch (ResourceAccessDeniedException $e) {
-            AuditLogger::logSystemAction(
-                event: 'security.resource_access_denied',
-                auditable: $context,
-                payload: [
-                    'tool' => $toolName,
-                    'role' => $role->value,
-                    'scope' => $scopeEnum->value,
-                    'violating_resource' => $e->violatingResource,
-                    'reason' => $e->reason,
-                    'arguments' => $this->redactSensitiveValues($arguments),
-                ],
-                correlationId: $context->correlation_id,
-            );
+            // 3. Capability & Role Permission Authorization
+            if (! $this->permissionService->isAllowed($role, $toolName)) {
+                $this->finalizeExecutionRecord($executionRecord, 'denied', [
+                    'error' => "Agent role [{$role->value}] is not authorized for tool [{$toolName}].",
+                ], $startTime);
 
-            Log::critical("Security violation on incident [{$context->incident_number}]: {$e->getMessage()}");
+                throw new UnauthorizedToolException($role, $toolName);
+            }
+
+            // 4. Strict Repository Boundary Isolation Guard
+            $this->repositoryGuard->validate($context, $arguments, $toolName);
+
+            // 5. Sandbox Security Boundary & Breakout Guard
+            $this->sandboxGuard->validate($context, $arguments, $toolName);
+
+            // 6. Multi-Tier Tool Risk Level Evaluation
+            $this->riskLevelGuard->evaluate($tool, $arguments, $context);
+
+            // 7. Human-In-The-Loop (HITL) Execution Gate
+            $this->hitlGuard->validate($tool, $arguments, $context);
+
+            $scopeStr = $tool->requiredPermission()->value;
+            $scopeEnum = ToolScope::tryFrom($scopeStr) ?? ToolScope::GITHUB_READ;
+
+            // 8. ABAC Resource-Level Constraint Validation
+            try {
+                $this->permissionService->validateResourceConstraints($scopeEnum, $arguments, $context);
+            } catch (ResourceAccessDeniedException $e) {
+                AuditLogger::logSystemAction(
+                    event: 'security.resource_access_denied',
+                    auditable: $context,
+                    payload: [
+                        'tool' => $toolName,
+                        'role' => $role->value,
+                        'scope' => $scopeEnum->value,
+                        'violating_resource' => $e->violatingResource,
+                        'reason' => $e->reason,
+                        'arguments' => $redactedArgs,
+                    ],
+                    correlationId: $context->correlation_id,
+                );
+
+                Log::critical("Security violation on incident [{$context->incident_number}]: {$e->getMessage()}");
+
+                $this->finalizeExecutionRecord($executionRecord, 'denied', [
+                    'error' => $e->getMessage(),
+                    'violating_resource' => $e->violatingResource,
+                ], $startTime);
+
+                throw $e;
+            }
+
+            // 9. Validate Input Arguments against Schema
+            $this->validateArguments($toolName, $tool->parametersSchema(), $arguments);
+
+            // 10. Monitored Tool Execution (Secrets injected securely in backend driver)
+            $rawOutput = $tool->execute($arguments, $context);
+
+            // 11. Sanitize, Truncate, and Redact Secrets
+            $sanitizedOutput = $this->sanitizeResponse($rawOutput);
+            $executionTime = round(microtime(true) - $startTime, 3);
+            $durationMs = round((microtime(true) - $startTime) * 1000, 2);
+
+            // 12. Finalize tool_executions record as SUCCESS
+            $this->finalizeExecutionRecord($executionRecord, 'success', $sanitizedOutput, $startTime);
+
+            // 13. Record Audit Event
+            if (config('mcp.security.audit_invocations', true)) {
+                AuditLogger::logSystemAction(
+                    event: 'mcp_gateway.tool_executed',
+                    auditable: $context,
+                    payload: [
+                        'tool' => $toolName,
+                        'role' => $role->value,
+                        'risk_level' => $riskLevel,
+                        'arguments' => $redactedArgs,
+                        'execution_time_seconds' => $executionTime,
+                        'duration_ms' => $durationMs,
+                    ],
+                    correlationId: $context->correlation_id,
+                );
+            }
+
+            return [
+                'success' => true,
+                'tool' => $toolName,
+                'role' => $role->value,
+                'risk_level' => $riskLevel,
+                'data' => $sanitizedOutput,
+                'execution_time_seconds' => $executionTime,
+                'duration_ms' => $durationMs,
+            ];
+        } catch (HitlApprovalRequiredException $e) {
+            $this->finalizeExecutionRecord($executionRecord, 'pending_approval', [
+                'reason' => $e->getMessage(),
+                'required_action' => $e->requiredAction,
+            ], $startTime);
+
+            throw $e;
+        } catch (ForbiddenHostCapabilityException|UnauthorizedCriticalActionException $e) {
+            $this->finalizeExecutionRecord($executionRecord, 'denied', [
+                'error' => $e->getMessage(),
+            ], $startTime);
+
+            throw $e;
+        } catch (Throwable $e) {
+            if ($executionRecord && $executionRecord->status === 'running') {
+                $this->finalizeExecutionRecord($executionRecord, 'failed', [
+                    'error' => $e->getMessage(),
+                ], $startTime);
+            }
 
             throw $e;
         }
+    }
 
-        // 7. Validate Input Arguments against Schema
-        $this->validateArguments($toolName, $tool->parametersSchema(), $arguments);
-
-        // 8. Monitored Tool Execution
-        $rawOutput = $tool->execute($arguments, $context);
-
-        // 9. Sanitize, Truncate, and Redact Secrets
-        $sanitizedOutput = $this->sanitizeResponse($rawOutput);
-        $executionTime = round(microtime(true) - $startTime, 3);
-
-        // 10. Record Audit Event
-        if (config('mcp.security.audit_invocations', true)) {
-            AuditLogger::logSystemAction(
-                event: 'mcp_gateway.tool_executed',
-                auditable: $context,
-                payload: [
-                    'tool' => $toolName,
-                    'role' => $role->value,
-                    'risk_level' => $tool->definition()->riskLevel->value,
-                    'arguments' => $this->redactSensitiveValues($arguments),
-                    'execution_time_seconds' => $executionTime,
-                ],
-                correlationId: $context->correlation_id,
-            );
+    /**
+     * Finalize the ToolExecution database record.
+     *
+     * @param  array<string, mixed>  $resultPayload
+     */
+    protected function finalizeExecutionRecord(?ToolExecution $record, string $status, array $resultPayload, float $startTime): void
+    {
+        if (! $record) {
+            return;
         }
 
-        return [
-            'success' => true,
-            'tool' => $toolName,
-            'role' => $role->value,
-            'risk_level' => $tool->definition()->riskLevel->value,
-            'data' => $sanitizedOutput,
-            'execution_time_seconds' => $executionTime,
-        ];
+        try {
+            $durationMs = round((microtime(true) - $startTime) * 1000, 2);
+            $record->update([
+                'status' => $status,
+                'result' => $resultPayload,
+                'completed_at' => now(),
+                'duration_ms' => $durationMs,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning("Failed to update tool_executions record [{$record->id}]: {$e->getMessage()}");
+        }
     }
 
     /**
@@ -203,11 +299,17 @@ class MCPToolGateway
      */
     protected function redactSensitiveValues(array $data): array
     {
-        $sensitiveKeys = ['token', 'password', 'secret', 'key', 'auth'];
+        $sensitiveKeys = ['token', 'password', 'secret', 'key', 'auth', 'pat'];
 
         foreach ($data as $key => $value) {
-            if (is_string($key) && in_array(strtolower($key), $sensitiveKeys, true)) {
-                $data[$key] = '***REDACTED***';
+            if (is_string($key)) {
+                $lowerKey = strtolower($key);
+                foreach ($sensitiveKeys as $sensitive) {
+                    if (str_contains($lowerKey, $sensitive)) {
+                        $data[$key] = '***REDACTED***';
+                        break;
+                    }
+                }
             }
         }
 

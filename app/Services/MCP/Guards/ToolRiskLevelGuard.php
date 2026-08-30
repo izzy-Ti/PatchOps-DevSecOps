@@ -2,21 +2,26 @@
 
 namespace App\Services\MCP\Guards;
 
-use App\Exceptions\MCP\UnauthorizedCriticalActionException;
+use App\Exceptions\MCP\HitlApprovalRequiredException;
 use App\Models\Incident;
-use App\Services\AuditLogger;
 use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\RiskLevel;
 use Illuminate\Support\Facades\Log;
 
 class ToolRiskLevelGuard
 {
+    public function __construct(
+        protected ?HitlApprovalGuard $hitlGuard = null,
+    ) {
+        $this->hitlGuard ??= app(HitlApprovalGuard::class);
+    }
+
     /**
      * Evaluate the risk level of the tool and enforce verification, branch/path restrictions, and HITL approval gates.
      *
      * @param  array<string, mixed>  $arguments
      *
-     * @throws UnauthorizedCriticalActionException
+     * @throws HitlApprovalRequiredException
      */
     public function evaluate(ToolInterface $tool, array $arguments, Incident $incident): void
     {
@@ -37,7 +42,7 @@ class ToolRiskLevelGuard
 
             case RiskLevel::CRITICAL:
                 // Production-impacting actions require explicit Human-in-the-Loop (HITL) sign-off
-                $this->assertHumanApproval($toolName, $arguments, $incident);
+                $this->hitlGuard->validate($tool, $arguments, $incident);
                 break;
         }
     }
@@ -65,44 +70,6 @@ class ToolRiskLevelGuard
             if (! $hasValidPrefix && ! empty($branchName)) {
                 Log::warning("High-risk tool [{$toolName}] called with non-standard branch [{$branchName}] on incident [{$incident->incident_number}].");
             }
-        }
-    }
-
-    /**
-     * Assert that a CRITICAL risk action has received explicit Human-in-the-Loop (HITL) approval.
-     *
-     * @param  array<string, mixed>  $arguments
-     *
-     * @throws UnauthorizedCriticalActionException
-     */
-    protected function assertHumanApproval(string $toolName, array $arguments, Incident $incident): void
-    {
-        $metadata = $incident->metadata ?? [];
-        $isHitlApproved = ($metadata['hitl_approved'] ?? false) === true
-            || ! empty($metadata['human_approval_signature'])
-            || ! empty($metadata['approved_by_user_id']);
-
-        if (! $isHitlApproved) {
-            AuditLogger::logSystemAction(
-                event: 'security.critical_tool_blocked',
-                auditable: $incident,
-                payload: [
-                    'tool' => $toolName,
-                    'risk_level' => RiskLevel::CRITICAL->value,
-                    'incident_id' => $incident->id,
-                    'incident_number' => $incident->incident_number,
-                    'reason' => 'Autonomous execution of CRITICAL tool blocked without human operator sign-off.',
-                ],
-                correlationId: $incident->correlation_id,
-            );
-
-            Log::critical("CRITICAL tool [{$toolName}] blocked autonomously on incident [{$incident->incident_number}]. HITL approval required.");
-
-            throw new UnauthorizedCriticalActionException(
-                toolName: $toolName,
-                reason: 'Autonomous execution of CRITICAL production-impacting tools is prohibited. Explicit Human-in-the-Loop (HITL) approval signature is required.',
-                incident: $incident,
-            );
         }
     }
 }

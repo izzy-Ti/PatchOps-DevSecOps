@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AgentRun extends Model
 {
@@ -55,5 +56,15 @@ class AgentRun extends Model
     public function incident(): BelongsTo
     {
         return $this->belongsTo(Incident::class);
+    }
+
+    /**
+     * Get the tool executions performed during this agent run.
+     *
+     * @return HasMany<ToolExecution, $this>
+     */
+    public function toolExecutions(): HasMany
+    {
+        return $this->hasMany(ToolExecution::class)->orderBy('id', 'asc');
     }
 }

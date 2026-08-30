@@ -278,4 +278,14 @@ class Incident extends Model
     {
         return strtolower(trim((string) $this->repository));
     }
+
+    /**
+     * Get the tool executions telemetry for this incident.
+     *
+     * @return HasMany<ToolExecution, $this>
+     */
+    public function toolExecutions(): HasMany
+    {
+        return $this->hasMany(ToolExecution::class)->orderBy('id', 'asc');
+    }
 }

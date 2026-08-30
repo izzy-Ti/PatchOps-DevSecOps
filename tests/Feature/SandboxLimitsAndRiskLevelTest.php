@@ -1,6 +1,6 @@
 <?php
 
-use App\Exceptions\MCP\UnauthorizedCriticalActionException;
+use App\Exceptions\MCP\HitlApprovalRequiredException;
 use App\Models\AuditLog;
 use App\Models\Incident;
 use App\Services\MCP\Guards\ToolRiskLevelGuard;
@@ -102,9 +102,9 @@ test('ToolRiskLevelGuard blocks CRITICAL production-impacting tools without HITL
 
     // 1. Autonomous execution without human sign-off -> Rejected
     expect(fn () => $guard->evaluate($criticalTool, [], $incident))
-        ->toThrow(UnauthorizedCriticalActionException::class);
+        ->toThrow(HitlApprovalRequiredException::class);
 
-    expect(AuditLog::where('event', 'security.critical_tool_blocked')->count())->toBeGreaterThan(0);
+    expect(AuditLog::where('event', 'security.hitl_gate_triggered')->count())->toBeGreaterThan(0);
 
     // 2. With explicit HITL approval -> Allowed
     $incident->metadata = ['hitl_approved' => true, 'human_approval_signature' => 'secops-lead-sig'];
