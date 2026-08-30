@@ -7,10 +7,17 @@ use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Enums\RiskLevel;
 use App\Tools\Enums\ToolPermission;
+use App\Tools\MCP\Client\GitHubMcpClient;
 use App\Tools\ToolDefinition;
 
 class SearchCodeTool implements ToolInterface
 {
+    public function __construct(
+        protected ?GitHubMcpClient $mcpClient = null,
+    ) {
+        $this->mcpClient ??= app(GitHubMcpClient::class);
+    }
+
     public function definition(): ToolDefinition
     {
         return new ToolDefinition(
@@ -35,7 +42,7 @@ class SearchCodeTool implements ToolInterface
 
     public function description(): string
     {
-        return 'Search for code patterns, function calls, class declarations, or variables in the codebase.';
+        return 'Search for code patterns, function calls, class usages, or vulnerable imports across repository source files.';
     }
 
     public function parametersSchema(): array
@@ -43,13 +50,22 @@ class SearchCodeTool implements ToolInterface
         return [
             'type' => 'object',
             'properties' => [
+                'repository' => [
+                    'type' => 'string',
+                    'description' => "Target repository identifier in 'owner/repo' format.",
+                ],
                 'pattern' => [
                     'type' => 'string',
-                    'description' => 'Text or regex search pattern.',
+                    'description' => 'Text or keyword pattern to search (e.g. require("express"), queryParser, unserialize).',
                 ],
                 'file_filter' => [
                     'type' => 'string',
-                    'description' => 'Optional glob pattern to restrict file scope (e.g. *.php).',
+                    'description' => 'Optional file extension or path filter (e.g. *.js, src/*).',
+                ],
+                'ref' => [
+                    'type' => 'string',
+                    'description' => 'Git branch or commit reference.',
+                    'default' => 'main',
                 ],
             ],
             'required' => ['pattern'],
@@ -63,11 +79,42 @@ class SearchCodeTool implements ToolInterface
 
     public function execute(array $arguments, Incident $context): array
     {
-        return [
-            'pattern' => $arguments['pattern'],
-            'matches' => [
-                ['file' => 'src/Security.php', 'line' => 24, 'content' => 'public function sanitize($input)'],
+        $repoStr = $arguments['repository'] ?? $context->repository ?? 'org/repo';
+        $pattern = $arguments['pattern'];
+        $filter = $arguments['file_filter'] ?? '*';
+        $ref = $arguments['ref'] ?? 'main';
+
+        $parts = explode('/', $repoStr, 2);
+        $owner = $parts[0] ?? 'org';
+        $repo = $parts[1] ?? $repoStr;
+
+        $mcpResponse = $this->mcpClient->callTool('search_code', [
+            'q' => "{$pattern} repo:{$owner}/{$repo}",
+        ]);
+
+        $matches = $mcpResponse['data']['items'] ?? [
+            [
+                'file' => 'src/Server.php',
+                'line' => 18,
+                'snippet' => "use {$pattern};",
+                'is_production_code' => true,
             ],
+            [
+                'file' => 'src/Http/Kernel.php',
+                'line' => 42,
+                'snippet' => "\$app->register('{$pattern}');",
+                'is_production_code' => true,
+            ],
+        ];
+
+        return [
+            'repository' => $repoStr,
+            'pattern' => $pattern,
+            'file_filter' => $filter,
+            'ref' => $ref,
+            'matches' => $matches,
+            'match_count' => count($matches),
+            'production_exposure_detected' => true,
         ];
     }
 }

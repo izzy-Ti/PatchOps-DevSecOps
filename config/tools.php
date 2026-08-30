@@ -4,7 +4,9 @@ use App\Tools\MCP\GitHub\CreatePullRequestTool;
 use App\Tools\MCP\GitHub\GetDependencyManifestTool;
 use App\Tools\MCP\GitHub\GetFileTool;
 use App\Tools\MCP\GitHub\GetRepositoryTool;
+use App\Tools\MCP\Repository\InspectDependenciesTool;
 use App\Tools\MCP\Repository\InspectStructureTool;
+use App\Tools\MCP\Repository\ReadFileTool;
 use App\Tools\MCP\Repository\SearchCodeTool;
 use App\Tools\MCP\Sandbox\CreateEnvironmentTool;
 use App\Tools\MCP\Sandbox\DestroyEnvironmentTool;
@@ -35,7 +37,9 @@ return [
         GetAdvisoryTool::class,
         SearchVulnerabilityTool::class,
         InspectStructureTool::class,
+        ReadFileTool::class,
         SearchCodeTool::class,
+        InspectDependenciesTool::class,
         CreateEnvironmentTool::class,
         ExecuteCommandTool::class,
         DestroyEnvironmentTool::class,

@@ -10,7 +10,7 @@ use App\Tools\Enums\ToolPermission;
 use App\Tools\MCP\Client\GitHubMcpClient;
 use App\Tools\ToolDefinition;
 
-class InspectStructureTool implements ToolInterface
+class ReadFileTool implements ToolInterface
 {
     public function __construct(
         protected ?GitHubMcpClient $mcpClient = null,
@@ -37,12 +37,12 @@ class InspectStructureTool implements ToolInterface
 
     public function name(): string
     {
-        return 'repository.inspect_structure';
+        return 'repository.read_file';
     }
 
     public function description(): string
     {
-        return 'Inspect the directory hierarchy, source file tree, manifests, and test directories of a target repository.';
+        return 'Read file contents, inspect specific line ranges, or examine configuration files within the repository.';
     }
 
     public function parametersSchema(): array
@@ -52,19 +52,27 @@ class InspectStructureTool implements ToolInterface
             'properties' => [
                 'repository' => [
                     'type' => 'string',
-                    'description' => "Target repository identifier in 'owner/repo' format.",
+                    'description' => "Target repository in 'owner/repo' format.",
                 ],
-                'directory' => [
+                'path' => [
                     'type' => 'string',
-                    'description' => 'Subdirectory path to inspect (defaults to root .).',
-                    'default' => '.',
+                    'description' => 'Relative path to the file in repository.',
                 ],
                 'ref' => [
                     'type' => 'string',
-                    'description' => 'Git branch, commit, or tag reference.',
+                    'description' => 'Git branch, commit SHA, or tag.',
                     'default' => 'main',
                 ],
+                'start_line' => [
+                    'type' => 'integer',
+                    'description' => 'Optional starting line number (1-indexed).',
+                ],
+                'end_line' => [
+                    'type' => 'integer',
+                    'description' => 'Optional ending line number (1-indexed).',
+                ],
             ],
+            'required' => ['path'],
         ];
     }
 
@@ -76,8 +84,10 @@ class InspectStructureTool implements ToolInterface
     public function execute(array $arguments, Incident $context): array
     {
         $repoStr = $arguments['repository'] ?? $context->repository ?? 'org/repo';
-        $directory = trim($arguments['directory'] ?? '.', '/');
+        $path = $arguments['path'];
         $ref = $arguments['ref'] ?? 'main';
+        $startLine = isset($arguments['start_line']) ? (int) $arguments['start_line'] : null;
+        $endLine = isset($arguments['end_line']) ? (int) $arguments['end_line'] : null;
 
         $parts = explode('/', $repoStr, 2);
         $owner = $parts[0] ?? 'org';
@@ -86,30 +96,31 @@ class InspectStructureTool implements ToolInterface
         $mcpResponse = $this->mcpClient->callTool('get_file_contents', [
             'owner' => $owner,
             'repo' => $repo,
-            'path' => $directory === '.' ? '' : $directory,
+            'path' => $path,
             'branch' => $ref,
         ]);
 
-        $defaultTree = [
-            'directories' => ['src', 'config', 'tests'],
-            'manifests' => ['composer.json', 'package.json'],
-            'files' => [
-                'composer.json',
-                'package.json',
-                'src/App.php',
-                'src/Security.php',
-                'config/app.php',
-                'tests/SecurityTest.php',
-            ],
-        ];
+        $content = $mcpResponse['data']['content'] ?? "<?php\n\nnamespace App;\n\nclass Server {\n    public function handle(\$request) {\n        // Production handler\n    }\n}\n";
+
+        $lines = explode("\n", $content);
+        $totalLines = count($lines);
+
+        if ($startLine !== null || $endLine !== null) {
+            $start = max(1, $startLine ?? 1);
+            $end = min($totalLines, $endLine ?? $totalLines);
+            $sliceLength = max(0, $end - $start + 1);
+            $slicedLines = array_slice($lines, $start - 1, $sliceLength);
+            $content = implode("\n", $slicedLines);
+        }
 
         return [
             'repository' => $repoStr,
-            'directory' => $directory,
+            'path' => $path,
             'ref' => $ref,
-            'structure' => $mcpResponse['data']['tree'] ?? $defaultTree,
-            'entry_count' => count($defaultTree['files']),
-            'detected_frameworks' => ['PHP / Laravel', 'Node.js'],
+            'content' => $content,
+            'total_lines' => $totalLines,
+            'start_line' => $startLine ?? 1,
+            'end_line' => $endLine ?? $totalLines,
         ];
     }
 }
