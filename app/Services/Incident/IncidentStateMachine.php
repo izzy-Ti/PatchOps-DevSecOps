@@ -13,7 +13,8 @@ use Illuminate\Support\Str;
 class IncidentStateMachine
 {
     /**
-     * Transition an incident to a target status with validation, history logging, event dispatching, and audit logging.
+     * Transition an incident to a target status with atomic database transaction,
+     * row-level locking, invariant validation, history logging, and post-commit event dispatching.
      *
      * @param  array<string, mixed>  $metadata
      *
@@ -27,62 +28,73 @@ class IncidentStateMachine
         ?string $actorId = null,
         array $metadata = [],
     ): Incident {
-        $currentStatus = $incident->status instanceof IncidentStatus
-            ? $incident->status
-            : (IncidentStatus::tryFrom((string) $incident->status) ?? IncidentStatus::RECEIVED);
+        return DB::transaction(function () use ($incident, $targetStatus, $reason, $actorType, $actorId, $metadata): Incident {
+            // 1. Lock Incident row for update
+            /** @var Incident $lockedIncident */
+            $lockedIncident = Incident::where('id', $incident->id)->lockForUpdate()->firstOrFail();
 
-        if (! $currentStatus->canTransitionTo($targetStatus)) {
-            throw new InvalidIncidentStatusTransitionException(
-                incident: $incident,
-                currentStatus: $currentStatus,
-                targetStatus: $targetStatus,
-            );
-        }
+            $currentStatus = $lockedIncident->status instanceof IncidentStatus
+                ? $lockedIncident->status
+                : (IncidentStatus::tryFrom((string) $lockedIncident->status) ?? IncidentStatus::RECEIVED);
 
-        return DB::transaction(function () use ($incident, $currentStatus, $targetStatus, $reason, $actorType, $actorId, $metadata): Incident {
-            $fromStatus = $currentStatus;
-
-            // Lifecycle hooks & state invariants
-            if ($targetStatus === IncidentStatus::RESOLVED && $incident->resolved_at === null) {
-                $incident->resolved_at = now();
-            } elseif ($targetStatus === IncidentStatus::CLOSED && $incident->resolved_at === null) {
-                $incident->resolved_at = now();
+            // 2. Validate Transition Guard
+            if (! $currentStatus->canTransitionTo($targetStatus)) {
+                throw new InvalidIncidentStatusTransitionException(
+                    incident: $lockedIncident,
+                    currentStatus: $currentStatus,
+                    targetStatus: $targetStatus,
+                );
             }
 
-            // Write immutable transition history log
-            $incident->transitions()->create([
+            $fromStatus = $currentStatus;
+
+            // 3. Lifecycle hooks & timestamps
+            if ($targetStatus === IncidentStatus::RESOLVED && $lockedIncident->resolved_at === null) {
+                $lockedIncident->resolved_at = now();
+            } elseif ($targetStatus === IncidentStatus::CLOSED && $lockedIncident->resolved_at === null) {
+                $lockedIncident->resolved_at = now();
+            }
+
+            $lockedIncident->status = $targetStatus;
+            $lockedIncident->save();
+
+            // 4. Insert immutable transition history record
+            $lockedIncident->transitions()->create([
                 'from_status' => $fromStatus,
                 'to_status' => $targetStatus,
                 'reason' => $reason,
                 'actor_type' => $actorType,
                 'actor_id' => $actorId ?? (auth()->check() ? (string) auth()->id() : 'system'),
-                'correlation_id' => $incident->correlation_id ?? (request()->header('X-Correlation-ID') ?: (string) Str::ulid()),
+                'correlation_id' => $lockedIncident->correlation_id ?? (request()->header('X-Correlation-ID') ?: (string) Str::ulid()),
                 'metadata' => $metadata,
             ]);
 
-            $incident->status = $targetStatus;
-            $incident->save();
-
-            // Dispatch domain event
-            IncidentStatusChanged::dispatch($incident, $fromStatus, $targetStatus, $reason, $metadata);
-
-            // Record audit log entry
+            // 5. Insert audit event record
             AuditLogger::logSystemAction(
                 event: 'incident.status_changed',
-                auditable: $incident,
+                auditable: $lockedIncident,
                 payload: array_merge([
-                    'incident_id' => $incident->id,
-                    'incident_number' => $incident->incident_number,
+                    'incident_id' => $lockedIncident->id,
+                    'incident_number' => $lockedIncident->incident_number,
                     'from_status' => $fromStatus->value,
                     'to_status' => $targetStatus->value,
                     'actor_type' => $actorType,
                     'actor_id' => $actorId,
                     'reason' => $reason,
                 ], $metadata),
-                correlationId: $incident->correlation_id,
+                correlationId: $lockedIncident->correlation_id,
             );
 
-            return $incident;
+            // 6. Sync original model instance attributes
+            $incident->fill($lockedIncident->getAttributes());
+            $incident->syncOriginal();
+
+            // 7. Dispatch domain event after transaction successfully commits
+            DB::afterCommit(function () use ($lockedIncident, $fromStatus, $targetStatus, $reason, $metadata) {
+                IncidentStatusChanged::dispatch($lockedIncident, $fromStatus, $targetStatus, $reason, $metadata);
+            });
+
+            return $lockedIncident;
         });
     }
 }
