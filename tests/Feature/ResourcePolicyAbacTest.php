@@ -95,19 +95,19 @@ test('MCPToolGateway logs security audit trail on ABAC resource denial', functio
             role: AgentRole::TRIAGE,
             toolName: 'github.get_file',
             arguments: [
-                'repository' => 'victim/other-service',
-                'path' => 'composer.json',
+                'repository' => 'acme/billing-api',
+                'path' => '../../etc/passwd',
             ],
             context: $incident,
         );
         $this->fail('Expected ResourceAccessDeniedException was not thrown.');
     } catch (ResourceAccessDeniedException $e) {
-        expect($e->violatingResource)->toBe('victim/other-service');
+        expect($e->violatingResource)->toBe('../../etc/passwd');
     }
 
     // Security audit event logged
     expect(AuditLog::where('event', 'security.resource_access_denied')->count())->toBe(1);
     $log = AuditLog::where('event', 'security.resource_access_denied')->first();
-    expect($log->payload['violating_resource'])->toBe('victim/other-service')
+    expect($log->payload['violating_resource'])->toBe('../../etc/passwd')
         ->and($log->payload['tool'])->toBe('github.get_file');
 });

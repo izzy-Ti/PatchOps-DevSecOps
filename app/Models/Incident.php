@@ -270,4 +270,12 @@ class Incident extends Model
             ->orWhere('correlation_id', $value)
             ->first();
     }
+
+    /**
+     * Get the normalized repository identifier for this incident.
+     */
+    public function getRepository(): string
+    {
+        return strtolower(trim((string) $this->repository));
+    }
 }

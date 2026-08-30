@@ -3,10 +3,12 @@
 namespace App\Services\MCP;
 
 use App\Exceptions\MCP\InvalidToolArgumentsException;
+use App\Exceptions\MCP\RepositoryAccessDeniedException;
 use App\Exceptions\MCP\ResourceAccessDeniedException;
 use App\Exceptions\MCP\UnauthorizedToolException;
 use App\Models\Incident;
 use App\Services\AuditLogger;
+use App\Services\MCP\Guards\RepositoryAccessGuard;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\ToolNotFoundException;
 use App\Tools\Permissions\ToolScope;
@@ -19,19 +21,22 @@ class MCPToolGateway
         protected ?MCPPermissionService $permissionService = null,
         protected ?ToolRegistry $registry = null,
         protected ?MCPClient $mcpClient = null,
+        protected ?RepositoryAccessGuard $repositoryGuard = null,
     ) {
         $this->permissionService ??= app(MCPPermissionService::class);
         $this->registry ??= app(ToolRegistry::class);
         $this->mcpClient ??= app(MCPClient::class);
+        $this->repositoryGuard ??= app(RepositoryAccessGuard::class);
     }
 
     /**
-     * Execute a tool through the strict non-bypassable MCP Tool Gateway pipeline with ABAC resource constraints.
+     * Execute a tool through the strict non-bypassable MCP Tool Gateway pipeline with repository isolation.
      *
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
      *
      * @throws UnauthorizedToolException
+     * @throws RepositoryAccessDeniedException
      * @throws ResourceAccessDeniedException
      * @throws InvalidToolArgumentsException
      * @throws ToolNotFoundException
@@ -60,11 +65,14 @@ class MCPToolGateway
             throw new UnauthorizedToolException($role, $toolName);
         }
 
+        // 3. Strict Repository Boundary Isolation Guard
+        $this->repositoryGuard->validate($context, $arguments, $toolName);
+
         $tool = $this->registry->get($toolName);
         $scopeStr = $tool->requiredPermission()->value;
         $scopeEnum = ToolScope::tryFrom($scopeStr) ?? ToolScope::GITHUB_READ;
 
-        // 3. ABAC Resource-Level Constraint Validation
+        // 4. ABAC Resource-Level Constraint Validation
         try {
             $this->permissionService->validateResourceConstraints($scopeEnum, $arguments, $context);
         } catch (ResourceAccessDeniedException $e) {
@@ -87,17 +95,17 @@ class MCPToolGateway
             throw $e;
         }
 
-        // 4. Validate Input Arguments against Schema
+        // 5. Validate Input Arguments against Schema
         $this->validateArguments($toolName, $tool->parametersSchema(), $arguments);
 
-        // 5. Monitored Tool Execution
+        // 6. Monitored Tool Execution
         $rawOutput = $tool->execute($arguments, $context);
 
-        // 6. Sanitize, Truncate, and Redact Secrets
+        // 7. Sanitize, Truncate, and Redact Secrets
         $sanitizedOutput = $this->sanitizeResponse($rawOutput);
         $executionTime = round(microtime(true) - $startTime, 3);
 
-        // 7. Record Audit Event
+        // 8. Record Audit Event
         if (config('mcp.security.audit_invocations', true)) {
             AuditLogger::logSystemAction(
                 event: 'mcp_gateway.tool_executed',
