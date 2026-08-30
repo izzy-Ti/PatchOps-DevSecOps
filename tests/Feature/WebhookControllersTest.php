@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -14,6 +15,7 @@ test('github webhook responds with pong on ping event', function () {
 });
 
 test('github webhook ingests dependabot alert and returns standard json envelope', function () {
+    Queue::fake();
     $payload = [
         'alert' => [
             'number' => 77,
@@ -68,6 +70,7 @@ test('github webhook ingests dependabot alert and returns standard json envelope
 });
 
 test('snyk webhook ingests vulnerability alert and returns standard json envelope', function () {
+    Queue::fake();
     $payload = [
         'issue' => [
             'id' => 'SNYK-PHP-LARAVEL-5555',
@@ -112,6 +115,7 @@ test('snyk webhook ingests vulnerability alert and returns standard json envelop
 });
 
 test('cve webhook ingests generic / trivy alert and returns standard json envelope', function () {
+    Queue::fake();
     $payload = [
         'VulnerabilityID' => 'CVE-2026-3333',
         'PkgName' => 'openssl',

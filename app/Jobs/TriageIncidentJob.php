@@ -2,8 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Agents\TriageAgent;
+use App\Enums\IncidentStatus;
 use App\Models\Incident;
-use App\Services\AuditLogger;
+use App\Services\Incident\IncidentStateMachine;
+use App\Workflows\IncidentOrchestrator;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -20,24 +23,34 @@ class TriageIncidentJob implements ShouldQueue
      */
     public function __construct(
         public Incident $incident,
-    ) {}
+    ) {
+        $this->onQueue('incidents');
+    }
 
     /**
      * Execute the job.
      */
-    public function handle(): void
-    {
+    public function handle(
+        TriageAgent $agent,
+        IncidentOrchestrator $orchestrator,
+        IncidentStateMachine $stateMachine,
+    ): void {
         Log::withContext(['correlation_id' => $this->incident->correlation_id]);
 
-        AuditLogger::logSystemAction(
-            event: 'workflow.triage_dispatched',
-            auditable: $this->incident,
-            payload: [
-                'incident_id' => $this->incident->id,
-                'incident_number' => $this->incident->incident_number,
-                'job' => static::class,
-            ],
-            correlationId: $this->incident->correlation_id,
-        );
+        $this->incident->refresh();
+
+        if ($this->incident->status === IncidentStatus::RECEIVED) {
+            $stateMachine->transition(
+                incident: $this->incident,
+                targetStatus: IncidentStatus::TRIAGING,
+                reason: 'Automated triage worker initiated',
+                actorType: 'agent',
+                actorId: 'triage-agent',
+            );
+        }
+
+        $result = $agent->analyze($this->incident);
+
+        $orchestrator->handleTriageResult($this->incident, $result);
     }
 }

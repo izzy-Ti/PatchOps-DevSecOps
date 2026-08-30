@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+        'model' => env('ANTHROPIC_TRIAGE_MODEL', 'claude-3-5-sonnet-latest'),
+        'version' => '2023-06-01',
+    ],
+
 ];
