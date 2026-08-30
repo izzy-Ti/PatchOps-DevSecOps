@@ -6,6 +6,7 @@ use App\Agents\ReproductionAgent;
 use App\Enums\IncidentStatus;
 use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
 use App\Jobs\Concerns\TracksAgentRuns;
+use App\Jobs\Middleware\LockIncidentExecution;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -34,6 +35,16 @@ class ReproduceIncidentJob implements ShouldQueue
     ) {
         $this->onQueue('incidents');
         $this->timeout = (int) config('patchops.timeouts.reproduce_job', 600);
+    }
+
+    /**
+     * Get the middleware the job should pass through.
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [new LockIncidentExecution];
     }
 
     /**

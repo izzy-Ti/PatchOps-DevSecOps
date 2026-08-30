@@ -21,4 +21,20 @@ return [
         'sandbox_idle' => (int) env('TIMEOUT_SANDBOX_IDLE', 60),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | PatchOps Distributed Locks
+    |--------------------------------------------------------------------------
+    |
+    | Distributed Redis/Cache lock settings to ensure atomic processing and
+    | prevent concurrent worker race conditions on the same incident.
+    |
+    */
+
+    'locks' => [
+        'incident_ttl_seconds' => (int) env('INCIDENT_LOCK_TTL', 300),
+        'incident_wait_seconds' => (int) env('INCIDENT_LOCK_WAIT', 5),
+        'orchestrator_ttl_seconds' => (int) env('INCIDENT_ORCHESTRATOR_LOCK_TTL', 30),
+    ],
+
 ];
