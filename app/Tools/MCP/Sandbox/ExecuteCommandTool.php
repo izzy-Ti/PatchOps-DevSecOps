@@ -30,7 +30,7 @@ class ExecuteCommandTool implements ToolInterface
                 AgentRole::REPRODUCTION,
                 AgentRole::VALIDATION,
             ],
-            riskLevel: RiskLevel::CRITICAL,
+            riskLevel: RiskLevel::MEDIUM,
         );
     }
 
@@ -59,8 +59,8 @@ class ExecuteCommandTool implements ToolInterface
                 ],
                 'timeout_seconds' => [
                     'type' => 'integer',
-                    'description' => 'Execution timeout in seconds (default 180s).',
-                    'default' => 180,
+                    'description' => 'Execution timeout in seconds (default 600s).',
+                    'default' => 600,
                 ],
             ],
             'required' => ['workspace_id', 'command'],

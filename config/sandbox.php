@@ -14,29 +14,28 @@ return [
 
     'docker_bin' => env('DOCKER_BINARY', 'docker'),
 
+    'limits' => [
+        'cpu' => env('SANDBOX_CPU_LIMIT', '2.0'),
+        'memory' => env('SANDBOX_MEMORY_LIMIT', '2g'),
+        'memory_swap' => env('SANDBOX_MEMORY_SWAP_LIMIT', '2g'),
+        'timeout_seconds' => (int) env('SANDBOX_TIMEOUT_SECONDS', 600), // 10 minutes
+        'tmpfs_size' => env('SANDBOX_TMPFS_SIZE', '512m'),
+        'pids_limit' => (int) env('SANDBOX_PIDS_LIMIT', 100),
+        'default_network' => env('SANDBOX_DEFAULT_NETWORK', 'none'), // Isolated network
+        'max_output_bytes' => (int) env('SANDBOX_MAX_OUTPUT_BYTES', 50000),
+    ],
+
     'security' => [
         'user' => env('SANDBOX_USER', '1000:1000'),
         'no_new_privileges' => true,
         'cap_drop_all' => true,
         'read_only_root' => (bool) env('SANDBOX_READ_ONLY_ROOT', true),
-        'tmpfs_size' => env('SANDBOX_TMPFS_SIZE', '64m'),
-        'network_mode' => env('SANDBOX_NETWORK', 'none'),
-    ],
-
-    'resources' => [
-        'memory_limit' => env('SANDBOX_MEMORY_LIMIT', '512m'),
-        'cpu_limit' => env('SANDBOX_CPU_LIMIT', '1.0'),
-        'pids_limit' => (int) env('SANDBOX_PIDS_LIMIT', 100),
+        'tmpfs_flags' => 'rw,noexec,nosuid',
     ],
 
     'timeouts' => [
-        'default_execution' => (int) env('SANDBOX_DEFAULT_TIMEOUT', 180),
-        'max_execution' => (int) env('SANDBOX_MAX_TIMEOUT', 300),
+        'default_execution' => (int) env('SANDBOX_TIMEOUT_SECONDS', 600),
         'container_stop' => (int) env('SANDBOX_STOP_TIMEOUT', 5),
-    ],
-
-    'limits' => [
-        'max_output_bytes' => (int) env('SANDBOX_MAX_OUTPUT_BYTES', 50000),
     ],
 
     'runtimes' => [

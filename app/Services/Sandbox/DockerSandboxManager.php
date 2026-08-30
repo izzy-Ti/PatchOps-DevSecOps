@@ -6,6 +6,7 @@ use App\Models\Incident;
 use App\Services\AuditLogger;
 use App\Services\Sandbox\Contracts\SandboxManagerInterface;
 use App\Services\Sandbox\DTOs\SandboxExecutionResultDTO;
+use App\Services\Sandbox\DTOs\SandboxLimitsDTO;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -28,14 +29,11 @@ class DockerSandboxManager implements SandboxManagerInterface
     {
         $uniqueSuffix = Str::lower(Str::random(8));
         $workspaceId = "sbx-{$incident->id}-{$uniqueSuffix}";
+        $limits = SandboxLimitsDTO::fromConfig();
 
         $image = config("sandbox.runtimes.{$ecosystem}") ?? config('sandbox.runtimes.node', 'node:20-alpine');
-        $memory = config('sandbox.resources.memory_limit', '512m');
-        $cpu = config('sandbox.resources.cpu_limit', '1.0');
-        $pidsLimit = config('sandbox.resources.pids_limit', 100);
         $user = config('sandbox.security.user', '1000:1000');
-        $tmpfs = config('sandbox.security.tmpfs_size', '64m');
-        $network = config('sandbox.security.network_mode', 'none');
+        $tmpfsFlags = config('sandbox.security.tmpfs_flags', 'rw,noexec,nosuid');
         $dockerBin = config('sandbox.docker_bin', 'docker');
 
         $workspaceDir = config('sandbox.storage_path')."/{$workspaceId}";
@@ -47,15 +45,16 @@ class DockerSandboxManager implements SandboxManagerInterface
             $dockerBin, 'run', '-d',
             '--name', $workspaceId,
             '--rm',
-            '--network', $network,
-            '--memory', $memory,
-            '--cpus', (string) $cpu,
-            '--pids-limit', (string) $pidsLimit,
+            '--network', $limits->network,
+            '--memory', $limits->memory,
+            '--memory-swap', $limits->memorySwap,
+            '--cpus', (string) $limits->cpu,
+            '--pids-limit', (string) $limits->pidsLimit,
             '--user', $user,
             '--cap-drop', 'ALL',
             '--security-opt', 'no-new-privileges',
             '--read-only',
-            '--tmpfs', "/tmp:rw,size={$tmpfs}",
+            '--tmpfs', "/tmp:{$tmpfsFlags},size={$limits->tmpfsSize}",
             '-v', "{$workspaceDir}:/workspace:rw",
             '-w', '/workspace',
         ];
@@ -93,6 +92,7 @@ class DockerSandboxManager implements SandboxManagerInterface
             'image' => $image,
             'docker_running' => $isDockerRunning,
             'workspace_dir' => $workspaceDir,
+            'limits' => $limits->toArray(),
             'created_at' => now()->toIso8601String(),
         ];
 
@@ -110,8 +110,12 @@ class DockerSandboxManager implements SandboxManagerInterface
                 'workspace_id' => $workspaceId,
                 'ecosystem' => $ecosystem,
                 'image' => $image,
-                'memory_limit' => $memory,
-                'network' => $network,
+                'cpu_limit' => $limits->cpu,
+                'memory_limit' => $limits->memory,
+                'memory_swap' => $limits->memorySwap,
+                'pids_limit' => $limits->pidsLimit,
+                'tmpfs_size' => $limits->tmpfsSize,
+                'network' => $limits->network,
             ],
             correlationId: $incident->correlation_id,
         );
@@ -125,8 +129,9 @@ class DockerSandboxManager implements SandboxManagerInterface
     public function execute(string $workspaceId, string $command, ?int $timeout = null): SandboxExecutionResultDTO
     {
         $startTime = microtime(true);
-        $timeout ??= (int) config('sandbox.timeouts.default_execution', 180);
-        $maxOutputBytes = (int) config('sandbox.limits.max_output_bytes', 50000);
+        $limits = SandboxLimitsDTO::fromConfig();
+        $timeout ??= $limits->timeoutSeconds;
+        $maxOutputBytes = $limits->maxOutputBytes;
         $dockerBin = config('sandbox.docker_bin', 'docker');
 
         $workspaceMeta = self::$activeWorkspaces[$workspaceId] ?? null;
