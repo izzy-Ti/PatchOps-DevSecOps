@@ -7,6 +7,7 @@ use App\Enums\IncidentStatus;
 use App\Enums\VulnerabilitySeverity;
 use App\Exceptions\InvalidIncidentStatusTransitionException;
 use App\Services\AuditLogger;
+use App\Services\Incident\IncidentStateMachine;
 use Database\Factories\IncidentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -77,45 +78,15 @@ class Incident extends Model
     }
 
     /**
-     * Transition the incident to a new status with validation and audit logging.
+     * Transition the incident to a new status via the dedicated State Machine service.
+     *
+     * @param  array<string, mixed>  $context
      *
      * @throws InvalidIncidentStatusTransitionException
      */
-    public function transitionTo(IncidentStatus $newStatus, ?string $reason = null): void
+    public function transitionTo(IncidentStatus $targetStatus, ?string $reason = null, array $context = []): Incident
     {
-        $currentStatus = $this->status instanceof IncidentStatus
-            ? $this->status
-            : (IncidentStatus::tryFrom((string) $this->status) ?? IncidentStatus::RECEIVED);
-
-        if (! $currentStatus->canTransitionTo($newStatus)) {
-            throw new InvalidIncidentStatusTransitionException(
-                fromStatus: $currentStatus,
-                toStatus: $newStatus,
-                incidentId: $this->id,
-            );
-        }
-
-        $fromStatus = $currentStatus;
-        $this->status = $newStatus;
-
-        if ($newStatus === IncidentStatus::RESOLVED && $this->resolved_at === null) {
-            $this->resolved_at = now();
-        }
-
-        $this->save();
-
-        AuditLogger::logSystemAction(
-            event: 'incident.status_changed',
-            auditable: $this,
-            payload: [
-                'incident_id' => $this->id,
-                'incident_number' => $this->incident_number,
-                'from_status' => $fromStatus->value,
-                'to_status' => $newStatus->value,
-                'reason' => $reason,
-            ],
-            correlationId: $this->correlation_id,
-        );
+        return app(IncidentStateMachine::class)->transition($this, $targetStatus, $reason, $context);
     }
 
     /**

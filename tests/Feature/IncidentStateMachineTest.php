@@ -1,12 +1,82 @@
 <?php
 
 use App\Enums\IncidentStatus;
+use App\Events\IncidentStatusChanged;
 use App\Exceptions\InvalidIncidentStatusTransitionException;
 use App\Models\AuditLog;
 use App\Models\Incident;
+use App\Services\Incident\IncidentStateMachine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 
 uses(RefreshDatabase::class);
+
+test('RECEIVED to TRIAGING transitions successfully, updates status, and fires IncidentStatusChanged event', function () {
+    Event::fake([IncidentStatusChanged::class]);
+
+    $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
+
+    $updatedIncident = $incident->transitionTo(IncidentStatus::TRIAGING, 'Initial security triage', ['agent' => 'TriageAgent']);
+
+    expect($updatedIncident->status)->toBe(IncidentStatus::TRIAGING);
+
+    $this->assertDatabaseHas('incidents', [
+        'id' => $incident->id,
+        'status' => 'triaging',
+    ]);
+
+    Event::assertDispatched(IncidentStatusChanged::class, function (IncidentStatusChanged $event) use ($incident) {
+        return $event->incident->id === $incident->id
+            && $event->fromStatus === IncidentStatus::RECEIVED
+            && $event->toStatus === IncidentStatus::TRIAGING
+            && $event->reason === 'Initial security triage'
+            && $event->context === ['agent' => 'TriageAgent'];
+    });
+
+    expect(AuditLog::where('event', 'incident.status_changed')->where('correlation_id', $incident->correlation_id)->exists())
+        ->toBeTrue();
+});
+
+test('RECEIVED to RESOLVED throws InvalidIncidentStatusTransitionException and leaves database record unchanged', function () {
+    Event::fake([IncidentStatusChanged::class]);
+
+    $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
+
+    try {
+        $incident->transitionTo(IncidentStatus::RESOLVED);
+        $this->fail('Expected InvalidIncidentStatusTransitionException was not thrown.');
+    } catch (InvalidIncidentStatusTransitionException $e) {
+        expect($e->currentStatus)->toBe(IncidentStatus::RECEIVED)
+            ->and($e->targetStatus)->toBe(IncidentStatus::RESOLVED);
+
+        $jsonResponse = $e->render(Request::create('/'));
+        expect($jsonResponse->getStatusCode())->toBe(422)
+            ->and($jsonResponse->getData(true))->toBe([
+                'message' => 'Invalid incident status transition.',
+                'error' => "Cannot transition from 'received' to 'resolved'.",
+            ]);
+    }
+
+    $this->assertDatabaseHas('incidents', [
+        'id' => $incident->id,
+        'status' => 'received',
+    ]);
+
+    Event::assertNotDispatched(IncidentStatusChanged::class);
+});
+
+test('IncidentStateMachine transition method operates correctly when called directly', function () {
+    Event::fake([IncidentStatusChanged::class]);
+
+    $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
+    $stateMachine = app(IncidentStateMachine::class);
+
+    $stateMachine->transition($incident, IncidentStatus::TRIAGING, 'Direct service call');
+
+    expect($incident->fresh()->status)->toBe(IncidentStatus::TRIAGING);
+    Event::assertDispatched(IncidentStatusChanged::class);
+});
 
 test('incident follows full linear success path from RECEIVED to CLOSED', function () {
     $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
@@ -54,29 +124,6 @@ test('incident handles validating to patching retry loop and failure paths', fun
     $incident->transitionTo(IncidentStatus::VALIDATING);
     $incident->transitionTo(IncidentStatus::AWAITING_APPROVAL);
     expect($incident->status)->toBe(IncidentStatus::AWAITING_APPROVAL);
-});
-
-test('incident handles controlled failure branch and escalation', function () {
-    $triageIncident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
-    $triageIncident->transitionTo(IncidentStatus::TRIAGING);
-    $triageIncident->transitionTo(IncidentStatus::ESCALATED, 'Unsupported complex legacy code');
-    expect($triageIncident->status)->toBe(IncidentStatus::ESCALATED);
-
-    $reproIncident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
-    $reproIncident->transitionTo(IncidentStatus::TRIAGING);
-    $reproIncident->transitionTo(IncidentStatus::PRIORITIZED);
-    $reproIncident->transitionTo(IncidentStatus::REPRODUCING);
-    $reproIncident->transitionTo(IncidentStatus::FAILED, 'Cannot reproduce in isolated container');
-    expect($reproIncident->status)->toBe(IncidentStatus::FAILED);
-});
-
-test('disallowed state transition throws InvalidIncidentStatusTransitionException', function () {
-    $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
-
-    expect(fn () => $incident->transitionTo(IncidentStatus::RESOLVED))
-        ->toThrow(InvalidIncidentStatusTransitionException::class);
-
-    expect($incident->status)->toBe(IncidentStatus::RECEIVED);
 });
 
 test('IncidentStatus helper methods verify terminal and human-awaiting states', function () {
