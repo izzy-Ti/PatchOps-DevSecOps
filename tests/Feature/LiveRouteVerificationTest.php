@@ -1,9 +1,7 @@
 <?php
 
-use App\Enums\IncidentPriority;
 use App\Enums\IncidentStatus;
 use App\Enums\UserRole;
-use App\Enums\VulnerabilitySeverity;
 use App\Models\AgentRun;
 use App\Models\Incident;
 use App\Models\IncidentTransition;
