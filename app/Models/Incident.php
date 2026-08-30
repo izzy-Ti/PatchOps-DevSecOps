@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 #[Fillable([
@@ -80,13 +81,25 @@ class Incident extends Model
     /**
      * Transition the incident to a new status via the dedicated State Machine service.
      *
-     * @param  array<string, mixed>  $context
+     * @param  array<string, mixed>  $metadata
      *
      * @throws InvalidIncidentStatusTransitionException
      */
-    public function transitionTo(IncidentStatus $targetStatus, ?string $reason = null, array $context = []): Incident
-    {
-        return app(IncidentStateMachine::class)->transition($this, $targetStatus, $reason, $context);
+    public function transitionTo(
+        IncidentStatus $targetStatus,
+        ?string $reason = null,
+        string $actorType = 'system',
+        ?string $actorId = null,
+        array $metadata = [],
+    ): Incident {
+        return app(IncidentStateMachine::class)->transition(
+            incident: $this,
+            targetStatus: $targetStatus,
+            reason: $reason,
+            actorType: $actorType,
+            actorId: $actorId,
+            metadata: $metadata,
+        );
     }
 
     /**
@@ -168,6 +181,16 @@ class Incident extends Model
     public function scopeClosed(Builder $query): Builder
     {
         return $query->where('status', IncidentStatus::CLOSED);
+    }
+
+    /**
+     * Get the history of status transitions for the incident.
+     *
+     * @return HasMany<IncidentTransition, $this>
+     */
+    public function transitions(): HasMany
+    {
+        return $this->hasMany(IncidentTransition::class)->orderBy('created_at', 'asc');
     }
 
     /**

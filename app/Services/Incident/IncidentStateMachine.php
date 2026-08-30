@@ -8,13 +8,14 @@ use App\Exceptions\InvalidIncidentStatusTransitionException;
 use App\Models\Incident;
 use App\Services\AuditLogger;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class IncidentStateMachine
 {
     /**
-     * Transition an incident to a target status with validation, hooks, event dispatching, and audit logging.
+     * Transition an incident to a target status with validation, history logging, event dispatching, and audit logging.
      *
-     * @param  array<string, mixed>  $context
+     * @param  array<string, mixed>  $metadata
      *
      * @throws InvalidIncidentStatusTransitionException
      */
@@ -22,7 +23,9 @@ class IncidentStateMachine
         Incident $incident,
         IncidentStatus $targetStatus,
         ?string $reason = null,
-        array $context = [],
+        string $actorType = 'system',
+        ?string $actorId = null,
+        array $metadata = [],
     ): Incident {
         $currentStatus = $incident->status instanceof IncidentStatus
             ? $incident->status
@@ -36,7 +39,7 @@ class IncidentStateMachine
             );
         }
 
-        return DB::transaction(function () use ($incident, $currentStatus, $targetStatus, $reason, $context): Incident {
+        return DB::transaction(function () use ($incident, $currentStatus, $targetStatus, $reason, $actorType, $actorId, $metadata): Incident {
             $fromStatus = $currentStatus;
 
             // Lifecycle hooks & state invariants
@@ -46,11 +49,22 @@ class IncidentStateMachine
                 $incident->resolved_at = now();
             }
 
+            // Write immutable transition history log
+            $incident->transitions()->create([
+                'from_status' => $fromStatus,
+                'to_status' => $targetStatus,
+                'reason' => $reason,
+                'actor_type' => $actorType,
+                'actor_id' => $actorId ?? (auth()->check() ? (string) auth()->id() : 'system'),
+                'correlation_id' => $incident->correlation_id ?? (request()->header('X-Correlation-ID') ?: (string) Str::ulid()),
+                'metadata' => $metadata,
+            ]);
+
             $incident->status = $targetStatus;
             $incident->save();
 
             // Dispatch domain event
-            IncidentStatusChanged::dispatch($incident, $fromStatus, $targetStatus, $reason, $context);
+            IncidentStatusChanged::dispatch($incident, $fromStatus, $targetStatus, $reason, $metadata);
 
             // Record audit log entry
             AuditLogger::logSystemAction(
@@ -61,8 +75,10 @@ class IncidentStateMachine
                     'incident_number' => $incident->incident_number,
                     'from_status' => $fromStatus->value,
                     'to_status' => $targetStatus->value,
+                    'actor_type' => $actorType,
+                    'actor_id' => $actorId,
                     'reason' => $reason,
-                ], $context),
+                ], $metadata),
                 correlationId: $incident->correlation_id,
             );
 

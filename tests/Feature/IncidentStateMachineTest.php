@@ -5,6 +5,7 @@ use App\Events\IncidentStatusChanged;
 use App\Exceptions\InvalidIncidentStatusTransitionException;
 use App\Models\AuditLog;
 use App\Models\Incident;
+use App\Models\IncidentTransition;
 use App\Services\Incident\IncidentStateMachine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -12,12 +13,18 @@ use Illuminate\Support\Facades\Event;
 
 uses(RefreshDatabase::class);
 
-test('RECEIVED to TRIAGING transitions successfully, updates status, and fires IncidentStatusChanged event', function () {
+test('RECEIVED to TRIAGING transitions successfully, updates status, writes history log, and fires event', function () {
     Event::fake([IncidentStatusChanged::class]);
 
     $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
 
-    $updatedIncident = $incident->transitionTo(IncidentStatus::TRIAGING, 'Initial security triage', ['agent' => 'TriageAgent']);
+    $updatedIncident = $incident->transitionTo(
+        targetStatus: IncidentStatus::TRIAGING,
+        reason: 'Initial security triage',
+        actorType: 'agent',
+        actorId: 'TriageAgent-1',
+        metadata: ['model' => 'gemini-1.5-pro'],
+    );
 
     expect($updatedIncident->status)->toBe(IncidentStatus::TRIAGING);
 
@@ -26,12 +33,25 @@ test('RECEIVED to TRIAGING transitions successfully, updates status, and fires I
         'status' => 'triaging',
     ]);
 
+    $this->assertDatabaseHas('incident_transitions', [
+        'incident_id' => $incident->id,
+        'from_status' => 'received',
+        'to_status' => 'triaging',
+        'reason' => 'Initial security triage',
+        'actor_type' => 'agent',
+        'actor_id' => 'TriageAgent-1',
+    ]);
+
+    expect($incident->transitions)->toHaveCount(1)
+        ->and($incident->transitions->first())->toBeInstanceOf(IncidentTransition::class)
+        ->and($incident->transitions->first()->metadata)->toBe(['model' => 'gemini-1.5-pro']);
+
     Event::assertDispatched(IncidentStatusChanged::class, function (IncidentStatusChanged $event) use ($incident) {
         return $event->incident->id === $incident->id
             && $event->fromStatus === IncidentStatus::RECEIVED
             && $event->toStatus === IncidentStatus::TRIAGING
             && $event->reason === 'Initial security triage'
-            && $event->context === ['agent' => 'TriageAgent'];
+            && $event->context === ['model' => 'gemini-1.5-pro'];
     });
 
     expect(AuditLog::where('event', 'incident.status_changed')->where('correlation_id', $incident->correlation_id)->exists())
@@ -63,6 +83,8 @@ test('RECEIVED to RESOLVED throws InvalidIncidentStatusTransitionException and l
         'status' => 'received',
     ]);
 
+    expect(IncidentTransition::where('incident_id', $incident->id)->count())->toBe(0);
+
     Event::assertNotDispatched(IncidentStatusChanged::class);
 });
 
@@ -72,13 +94,19 @@ test('IncidentStateMachine transition method operates correctly when called dire
     $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
     $stateMachine = app(IncidentStateMachine::class);
 
-    $stateMachine->transition($incident, IncidentStatus::TRIAGING, 'Direct service call');
+    $stateMachine->transition(
+        incident: $incident,
+        targetStatus: IncidentStatus::TRIAGING,
+        reason: 'Direct service call',
+        actorType: 'system',
+    );
 
     expect($incident->fresh()->status)->toBe(IncidentStatus::TRIAGING);
     Event::assertDispatched(IncidentStatusChanged::class);
+    expect($incident->transitions)->toHaveCount(1);
 });
 
-test('incident follows full linear success path from RECEIVED to CLOSED', function () {
+test('incident tracks full transition history across linear success path', function () {
     $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
 
     $linearPath = [
@@ -102,7 +130,8 @@ test('incident follows full linear success path from RECEIVED to CLOSED', functi
     }
 
     expect($incident->resolved_at)->not->toBeNull()
-        ->and(AuditLog::where('event', 'incident.status_changed')->count())->toBe(12);
+        ->and(AuditLog::where('event', 'incident.status_changed')->count())->toBe(12)
+        ->and($incident->transitions()->count())->toBe(12);
 });
 
 test('incident handles validating to patching retry loop and failure paths', function () {
@@ -124,6 +153,8 @@ test('incident handles validating to patching retry loop and failure paths', fun
     $incident->transitionTo(IncidentStatus::VALIDATING);
     $incident->transitionTo(IncidentStatus::AWAITING_APPROVAL);
     expect($incident->status)->toBe(IncidentStatus::AWAITING_APPROVAL);
+
+    expect($incident->transitions()->count())->toBe(9);
 });
 
 test('IncidentStatus helper methods verify terminal and human-awaiting states', function () {
