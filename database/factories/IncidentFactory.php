@@ -31,7 +31,7 @@ class IncidentFactory extends Factory
             'description' => fake()->paragraph(),
             'severity' => fake()->randomElement(VulnerabilitySeverity::cases()),
             'priority' => fake()->randomElement(IncidentPriority::cases()),
-            'status' => IncidentStatus::OPEN,
+            'status' => IncidentStatus::RECEIVED,
             'repository' => 'izzy-Ti/'.fake()->slug(2),
             'environment' => 'sandbox',
             'root_cause' => fake()->sentence(8),

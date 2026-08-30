@@ -44,7 +44,7 @@ test('GET /api/v1/incidents returns paginated incident collection', function () 
 
 test('GET /api/v1/incidents filters by status, severity, priority, and repository', function () {
     Incident::factory()->create([
-        'status' => IncidentStatus::OPEN,
+        'status' => IncidentStatus::RECEIVED,
         'severity' => VulnerabilitySeverity::CRITICAL,
         'priority' => IncidentPriority::URGENT,
         'repository' => 'izzy-Ti/patchops-core',
@@ -58,7 +58,7 @@ test('GET /api/v1/incidents filters by status, severity, priority, and repositor
     ]);
 
     // Filter by status
-    $statusResponse = $this->getJson('/api/v1/incidents?status=open');
+    $statusResponse = $this->getJson('/api/v1/incidents?status=received');
     $statusResponse->assertOk();
     expect($statusResponse->json('meta.total'))->toBe(1);
 
@@ -96,7 +96,7 @@ test('GET /api/v1/incidents/{id} returns incident details with nested vulnerabil
         'title' => 'CVE-2026-12345',
         'severity' => VulnerabilitySeverity::HIGH,
         'priority' => IncidentPriority::HIGH,
-        'status' => IncidentStatus::OPEN,
+        'status' => IncidentStatus::RECEIVED,
         'repository' => 'owner/repo',
         'environment' => 'sandbox',
     ]);
@@ -112,7 +112,7 @@ test('GET /api/v1/incidents/{id} returns incident details with nested vulnerabil
                 'title' => 'CVE-2026-12345',
                 'severity' => 'high',
                 'priority' => 'high',
-                'status' => 'open',
+                'status' => 'received',
                 'repository' => 'owner/repo',
                 'environment' => 'sandbox',
                 'vulnerability' => [

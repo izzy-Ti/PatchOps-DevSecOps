@@ -157,7 +157,7 @@ test('authenticated user can create an incident and get correlation_id', functio
             'data' => [
                 'title' => 'SQL Injection Vulnerability in User Search',
                 'severity' => 'high',
-                'status' => 'open',
+                'status' => 'received',
                 'correlation_id' => 'INC-VULN-001',
             ],
         ]);
@@ -176,7 +176,7 @@ test('authenticated user can list and filter incidents', function () {
     $user = User::factory()->create();
     Sanctum::actingAs($user);
 
-    Incident::factory()->create(['severity' => 'critical', 'status' => 'open']);
+    Incident::factory()->create(['severity' => 'critical', 'status' => 'received']);
     Incident::factory()->create(['severity' => 'low', 'status' => 'resolved']);
     Incident::factory()->create(['severity' => 'critical', 'status' => 'triaging']);
 

@@ -20,7 +20,7 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->string('severity')->default('medium')->index();
             $table->string('priority')->default('medium')->index();
-            $table->string('status')->default('open')->index();
+            $table->string('status')->default('received')->index();
             $table->string('repository')->nullable()->index();
             $table->string('environment')->nullable()->default('sandbox');
             $table->longText('root_cause')->nullable();

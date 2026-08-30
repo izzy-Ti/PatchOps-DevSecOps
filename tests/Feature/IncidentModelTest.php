@@ -65,3 +65,15 @@ test('incident model casts enums and dates and auto-generates correlation_id and
         ->and($incident->vulnerability->id)->toBe($vuln->id)
         ->and($incident->user->id)->toBe($user->id);
 });
+
+test('incident model scopes filter by status milestones', function () {
+    $received = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
+    $triaging = Incident::factory()->create(['status' => IncidentStatus::TRIAGING]);
+    $resolved = Incident::factory()->create(['status' => IncidentStatus::RESOLVED]);
+    $closed = Incident::factory()->create(['status' => IncidentStatus::CLOSED]);
+
+    expect(Incident::received()->pluck('id')->all())->toBe([$received->id])
+        ->and(Incident::triaging()->pluck('id')->all())->toBe([$triaging->id])
+        ->and(Incident::resolved()->pluck('id')->all())->toBe([$resolved->id])
+        ->and(Incident::closed()->pluck('id')->all())->toBe([$closed->id]);
+});

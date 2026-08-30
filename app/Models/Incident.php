@@ -8,6 +8,7 @@ use App\Enums\VulnerabilitySeverity;
 use App\Services\AuditLogger;
 use Database\Factories\IncidentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -43,7 +44,7 @@ class Incident extends Model
     protected $attributes = [
         'severity' => VulnerabilitySeverity::MEDIUM,
         'priority' => IncidentPriority::MEDIUM,
-        'status' => IncidentStatus::OPEN,
+        'status' => IncidentStatus::RECEIVED,
         'environment' => 'sandbox',
     ];
 
@@ -72,6 +73,50 @@ class Incident extends Model
             'metadata' => 'array',
             'resolved_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Scope a query to only include received incidents.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeReceived(Builder $query): Builder
+    {
+        return $query->where('status', IncidentStatus::RECEIVED);
+    }
+
+    /**
+     * Scope a query to only include triaging incidents.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeTriaging(Builder $query): Builder
+    {
+        return $query->where('status', IncidentStatus::TRIAGING);
+    }
+
+    /**
+     * Scope a query to only include resolved incidents.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeResolved(Builder $query): Builder
+    {
+        return $query->where('status', IncidentStatus::RESOLVED);
+    }
+
+    /**
+     * Scope a query to only include closed incidents.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeClosed(Builder $query): Builder
+    {
+        return $query->where('status', IncidentStatus::CLOSED);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\IncidentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\StoreIncidentRequest;
 use App\Http\Resources\IncidentResource;
@@ -12,9 +13,6 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class IncidentController extends Controller
 {
-    /**
-     * Display a paginated listing of incidents with optional filters.
-     */
     public function index(Request $request): AnonymousResourceCollection
     {
         $query = Incident::query();
@@ -22,7 +20,6 @@ class IncidentController extends Controller
         if ($request->filled('status')) {
             $query->where('status', $request->query('status'));
         }
-
         if ($request->filled('severity')) {
             $query->where('severity', $request->query('severity'));
         }
@@ -40,9 +37,6 @@ class IncidentController extends Controller
         return IncidentResource::collection($incidents);
     }
 
-    /**
-     * Store a newly created incident.
-     */
     public function store(StoreIncidentRequest $request): IncidentResource
     {
         $user = $request->user();
@@ -51,7 +45,7 @@ class IncidentController extends Controller
             'title' => $request->validated('title'),
             'description' => $request->validated('description'),
             'severity' => $request->validated('severity', 'medium'),
-            'status' => 'open',
+            'status' => IncidentStatus::RECEIVED,
             'metadata' => $request->validated('metadata'),
             'user_id' => $user?->id,
         ]);
@@ -72,9 +66,6 @@ class IncidentController extends Controller
         return new IncidentResource($incident);
     }
 
-    /**
-     * Display the specified incident by ID with loaded vulnerability details.
-     */
     public function show(Incident $incident): IncidentResource
     {
         $incident->loadMissing('vulnerability');

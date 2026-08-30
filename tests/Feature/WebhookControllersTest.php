@@ -44,7 +44,7 @@ test('github webhook ingests dependabot alert and returns standard json envelope
             'data' => [
                 'source' => 'github',
                 'severity' => 'critical',
-                'status' => 'open',
+                'status' => 'received',
             ],
         ])
         ->assertJsonStructure([
@@ -63,7 +63,7 @@ test('github webhook ingests dependabot alert and returns standard json envelope
 
     $this->assertDatabaseHas('incidents', [
         'severity' => 'critical',
-        'status' => 'open',
+        'status' => 'received',
     ]);
 });
 
@@ -93,7 +93,7 @@ test('snyk webhook ingests vulnerability alert and returns standard json envelop
             'data' => [
                 'source' => 'snyk',
                 'severity' => 'high',
-                'status' => 'open',
+                'status' => 'received',
             ],
         ])
         ->assertJsonStructure([
@@ -133,7 +133,7 @@ test('cve webhook ingests generic / trivy alert and returns standard json envelo
             'data' => [
                 'source' => 'cve',
                 'severity' => 'critical',
-                'status' => 'open',
+                'status' => 'received',
             ],
         ])
         ->assertJsonStructure([
