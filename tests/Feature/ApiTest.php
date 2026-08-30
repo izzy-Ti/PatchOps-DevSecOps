@@ -180,7 +180,7 @@ test('authenticated user can list and filter incidents', function () {
 
     Incident::factory()->create(['severity' => 'critical', 'status' => 'open']);
     Incident::factory()->create(['severity' => 'low', 'status' => 'resolved']);
-    Incident::factory()->create(['severity' => 'critical', 'status' => 'in_progress']);
+    Incident::factory()->create(['severity' => 'critical', 'status' => 'triaging']);
 
     $response = $this->getJson('/api/incidents');
     $response->assertOk()

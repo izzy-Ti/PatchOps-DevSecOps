@@ -13,13 +13,21 @@ return new class extends Migration
     {
         Schema::create('incidents', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('vulnerability_id')->nullable()->constrained('vulnerabilities')->nullOnDelete();
             $table->string('correlation_id')->index();
+            $table->string('incident_number')->unique()->index();
             $table->string('title');
-            $table->text('description');
+            $table->text('description')->nullable();
             $table->string('severity')->default('medium')->index();
+            $table->string('priority')->default('medium')->index();
             $table->string('status')->default('open')->index();
+            $table->string('repository')->nullable()->index();
+            $table->string('environment')->nullable()->default('sandbox');
+            $table->longText('root_cause')->nullable();
+            $table->string('assigned_agent')->nullable();
             $table->json('metadata')->nullable();
-            $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamp('resolved_at')->nullable();
             $table->timestamps();
         });
     }
