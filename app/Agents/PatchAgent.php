@@ -2,7 +2,8 @@
 
 namespace App\Agents;
 
-use App\DTOs\PatchResultDTO;
+use App\DTOs\AgentErrorDTO;
+use App\DTOs\AgentResultDTO;
 use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
 use Illuminate\Http\Client\ConnectionException;
@@ -30,8 +31,9 @@ PROMPT;
     /**
      * Generate a minimal security patch and regression test for an incident.
      */
-    public function generatePatch(Incident $incident): PatchResultDTO
+    public function generatePatch(Incident $incident): AgentResultDTO
     {
+        $startTime = microtime(true);
         $apiKey = config('services.anthropic.key');
         $model = config('services.anthropic.model', 'claude-3-5-sonnet-latest');
         $version = config('services.anthropic.version', '2023-06-01');
@@ -59,12 +61,17 @@ PROMPT;
 +});
 DIFF;
 
-            return PatchResultDTO::success(
-                rootCause: "Unsanitized user input allowed potential payload execution in {$incident->title}.",
-                fixSummary: "Applied input sanitization and added {$cve} regression test.",
-                diff: $diff,
-                changedFiles: ['src/SecurityHandler.php'],
-                testsAdded: ['tests/SecurityHandlerTest.php'],
+            $totalTime = round(microtime(true) - $startTime, 3);
+
+            return AgentResultDTO::success(
+                data: [
+                    'root_cause' => "Unsanitized user input allowed potential payload execution in {$incident->title}.",
+                    'fix_summary' => "Applied input sanitization and added {$cve} regression test.",
+                    'diff' => $diff,
+                    'changed_files' => ['src/SecurityHandler.php'],
+                    'tests_added' => ['tests/SecurityHandlerTest.php'],
+                ],
+                metadata: ['agent' => 'PatchAgent', 'execution_time_seconds' => $totalTime],
             );
         }
 
@@ -128,6 +135,8 @@ DIFF;
                 'content-type' => 'application/json',
             ])->timeout(90)->post('https://api.anthropic.com/v1/messages', $payload);
 
+            $totalTime = round(microtime(true) - $startTime, 3);
+
             if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
                 throw new TransientAgentInfrastructureException("Claude API transient status during patch synthesis [{$response->status()}]: {$response->body()}");
             }
@@ -139,9 +148,11 @@ DIFF;
                     'body' => $response->body(),
                 ]);
 
-                return PatchResultDTO::failed(
-                    reason: "Claude API error: {$response->status()} - {$response->body()}",
-                    raw: $response->json() ?? [],
+                return AgentResultDTO::failure(
+                    code: AgentErrorDTO::LLM_API_ERROR,
+                    message: "Claude API error: {$response->status()} - {$response->body()}",
+                    details: $response->json() ?? [],
+                    metadata: ['agent' => 'PatchAgent', 'execution_time_seconds' => $totalTime],
                 );
             }
 
@@ -152,32 +163,43 @@ DIFF;
                 if (($block['type'] ?? null) === 'tool_use' && ($block['name'] ?? null) === 'record_patch_synthesis') {
                     $input = $block['input'] ?? [];
 
-                    return PatchResultDTO::success(
-                        rootCause: $input['root_cause'] ?? '',
-                        fixSummary: $input['fix_summary'] ?? '',
-                        diff: $input['diff'] ?? '',
-                        changedFiles: $input['changed_files'] ?? [],
-                        testsAdded: $input['tests_added'] ?? [],
-                        raw: $responseData,
+                    return AgentResultDTO::success(
+                        data: [
+                            'root_cause' => $input['root_cause'] ?? '',
+                            'fix_summary' => $input['fix_summary'] ?? '',
+                            'diff' => $input['diff'] ?? '',
+                            'changed_files' => $input['changed_files'] ?? [],
+                            'tests_added' => $input['tests_added'] ?? [],
+                        ],
+                        metadata: ['agent' => 'PatchAgent', 'execution_time_seconds' => $totalTime],
                     );
                 }
             }
 
-            return PatchResultDTO::failed(
-                reason: 'Claude API responded without calling record_patch_synthesis tool.',
-                raw: $responseData,
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::SCHEMA_VALIDATION_FAILED,
+                message: 'Claude API responded without calling record_patch_synthesis tool.',
+                details: $responseData ?? [],
+                metadata: ['agent' => 'PatchAgent', 'execution_time_seconds' => $totalTime],
             );
         } catch (ConnectionException $e) {
             throw new TransientAgentInfrastructureException("Network connection error during patch synthesis: {$e->getMessage()}", 0, $e);
         } catch (TransientAgentInfrastructureException $e) {
             throw $e;
         } catch (Throwable $e) {
+            $totalTime = round(microtime(true) - $startTime, 3);
+
             Log::error('Exception occurred during PatchAgent execution.', [
                 'incident_id' => $incident->id,
                 'error' => $e->getMessage(),
             ]);
 
-            return PatchResultDTO::failed("PatchAgent execution exception: {$e->getMessage()}");
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::PATCH_SYNTHESIS_FAILED,
+                message: "PatchAgent execution exception: {$e->getMessage()}",
+                details: ['exception' => $e->getMessage()],
+                metadata: ['agent' => 'PatchAgent', 'execution_time_seconds' => $totalTime],
+            );
         }
     }
 

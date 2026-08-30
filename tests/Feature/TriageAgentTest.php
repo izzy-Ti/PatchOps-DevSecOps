@@ -1,7 +1,7 @@
 <?php
 
 use App\Agents\TriageAgent;
-use App\DTOs\TriageResultDTO;
+use App\DTOs\AgentResultDTO;
 use App\Enums\IncidentPriority;
 use App\Enums\IncidentStatus;
 use App\Enums\VulnerabilitySeverity;
@@ -15,41 +15,32 @@ use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
-test('TriageResultDTO validates correct and incomplete payloads', function () {
-    $valid = TriageResultDTO::success([
-        'severity' => 'critical',
-        'priority' => 'critical',
-        'production_exposed' => true,
-        'affected_component' => 'express/router',
-        'reason' => 'RCE via prototype pollution in production API router',
-    ]);
+test('AgentResultDTO creates standardized success and failure envelopes', function () {
+    $success = AgentResultDTO::success(
+        data: ['severity' => 'critical', 'priority' => 'critical'],
+        metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => 0.45],
+    );
 
-    expect($valid->isValid())->toBeTrue();
+    expect($success->success)->toBeTrue()
+        ->and($success->status)->toBe('completed')
+        ->and($success->data['severity'])->toBe('critical')
+        ->and($success->error)->toBeNull()
+        ->and($success->metadata['agent'])->toBe('TriageAgent');
 
-    $invalidSeverity = TriageResultDTO::success([
-        'severity' => 'unknown_severity',
-        'priority' => 'critical',
-        'production_exposed' => true,
-        'affected_component' => 'express/router',
-        'reason' => 'Reason',
-    ]);
-    expect($invalidSeverity->isValid())->toBeFalse();
+    $failure = AgentResultDTO::failure(
+        code: 'SCHEMA_VALIDATION_FAILED',
+        message: 'Invalid payload',
+        details: ['field' => 'severity'],
+        metadata: ['agent' => 'TriageAgent'],
+    );
 
-    $missingField = TriageResultDTO::success([
-        'severity' => 'high',
-        'priority' => 'high',
-        'production_exposed' => null,
-        'affected_component' => '',
-        'reason' => 'Reason',
-    ]);
-    expect($missingField->isValid())->toBeFalse();
-
-    $failed = TriageResultDTO::failure('Network timeout');
-    expect($failed->isValid())->toBeFalse()
-        ->and($failed->errorMessage)->toBe('Network timeout');
+    expect($failure->success)->toBeFalse()
+        ->and($failure->status)->toBe('failed')
+        ->and($failure->error?->code)->toBe('SCHEMA_VALIDATION_FAILED')
+        ->and($failure->error?->message)->toBe('Invalid payload');
 });
 
-test('TriageAgent analyzes incident and returns structured TriageResultDTO via Claude tool calling', function () {
+test('TriageAgent analyzes incident and returns structured AgentResultDTO via Claude tool calling', function () {
     config()->set('services.anthropic.key', 'sk-ant-test-key');
 
     Http::fake([
@@ -87,13 +78,14 @@ test('TriageAgent analyzes incident and returns structured TriageResultDTO via C
     $agent = new TriageAgent;
     $result = $agent->analyze($incident);
 
-    expect($result)->toBeInstanceOf(TriageResultDTO::class)
-        ->and($result->isValid())->toBeTrue()
-        ->and($result->severity)->toBe('critical')
-        ->and($result->priority)->toBe('critical')
-        ->and($result->productionExposed)->toBeTrue()
-        ->and($result->affectedComponent)->toBe('symfony/http-foundation')
-        ->and($result->reason)->toContain('Remote Code Execution');
+    expect($result)->toBeInstanceOf(AgentResultDTO::class)
+        ->and($result->success)->toBeTrue()
+        ->and($result->status)->toBe('completed')
+        ->and($result->data['severity'])->toBe('critical')
+        ->and($result->data['priority'])->toBe('critical')
+        ->and($result->data['production_exposed'])->toBeTrue()
+        ->and($result->data['affected_component'])->toBe('symfony/http-foundation')
+        ->and($result->data['reason'])->toContain('Remote Code Execution');
 });
 
 test('TriageAgent gracefully handles Claude API non-transient error', function () {
@@ -110,8 +102,8 @@ test('TriageAgent gracefully handles Claude API non-transient error', function (
     $agent = new TriageAgent;
     $result = $agent->analyze($incident);
 
-    expect($result->isValid())->toBeFalse()
-        ->and($result->errorMessage)->toContain('Anthropic API error: 400');
+    expect($result->success)->toBeFalse()
+        ->and($result->error?->message)->toContain('Anthropic API error: 400');
 });
 
 test('TriageIncidentJob executes full triage flow from RECEIVED to PRIORITIZED and dispatches reproduction job', function () {
@@ -176,6 +168,7 @@ test('TriageIncidentJob escalates incident when triage fails', function () {
 
     $incident->refresh();
 
-    expect($incident->status)->toBe(IncidentStatus::ESCALATED);
+    expect($incident->status)->toBe(IncidentStatus::ESCALATED)
+        ->and($incident->metadata['error_history'])->toHaveCount(1);
     Queue::assertNotPushed(ReproduceIncidentJob::class);
 });

@@ -1,7 +1,7 @@
 <?php
 
 use App\Agents\PatchAgent;
-use App\DTOs\PatchResultDTO;
+use App\DTOs\AgentResultDTO;
 use App\Enums\IncidentStatus;
 use App\Jobs\GeneratePatchJob;
 use App\Jobs\ValidatePatchJob;
@@ -15,31 +15,6 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config()->set('services.anthropic.key', null);
-});
-
-test('PatchResultDTO validates complete and invalid patch payloads', function () {
-    $valid = PatchResultDTO::success(
-        rootCause: 'Missing bounds check in array slice parser.',
-        fixSummary: 'Added clamp checks and unit tests.',
-        diff: "--- a/file.php\n+++ b/file.php\n@@ -1 +1 @@\n-old\n+new\n",
-        changedFiles: ['src/file.php'],
-        testsAdded: ['tests/fileTest.php'],
-    );
-
-    expect($valid->isValid())->toBeTrue();
-
-    $missingDiff = PatchResultDTO::success(
-        rootCause: 'Root cause',
-        fixSummary: 'Summary',
-        diff: '',
-        changedFiles: [],
-        testsAdded: [],
-    );
-    expect($missingDiff->isValid())->toBeFalse();
-
-    $failed = PatchResultDTO::failed('Syntax error in prompt');
-    expect($failed->isValid())->toBeFalse()
-        ->and($failed->failureReason)->toBe('Syntax error in prompt');
 });
 
 test('PatchAgent synthesizes patch and regression tests via Claude tool calling', function () {
@@ -91,12 +66,13 @@ DIFF;
     $agent = new PatchAgent;
     $result = $agent->generatePatch($incident);
 
-    expect($result)->toBeInstanceOf(PatchResultDTO::class)
-        ->and($result->isValid())->toBeTrue()
-        ->and($result->rootCause)->toContain('Timing attack')
-        ->and($result->diff)->toContain('hash_equals')
-        ->and($result->changedFiles)->toBe(['src/SecurityService.php'])
-        ->and($result->testsAdded)->toBe(['tests/SecurityServiceTest.php']);
+    expect($result)->toBeInstanceOf(AgentResultDTO::class)
+        ->and($result->success)->toBeTrue()
+        ->and($result->status)->toBe('completed')
+        ->and($result->data['root_cause'])->toContain('Timing attack')
+        ->and($result->data['diff'])->toContain('hash_equals')
+        ->and($result->data['changed_files'])->toBe(['src/SecurityService.php'])
+        ->and($result->data['tests_added'])->toBe(['tests/SecurityServiceTest.php']);
 });
 
 test('GeneratePatchJob executes patch synthesis, transitions to VALIDATING, and dispatches ValidatePatchJob', function () {
@@ -168,7 +144,7 @@ test('GeneratePatchJob escalates incident when patch synthesis fails', function 
     $incident->refresh();
 
     expect($incident->status)->toBe(IncidentStatus::ESCALATED)
-        ->and($incident->metadata['patch_failure_reason'])->not->toBeNull();
+        ->and($incident->metadata['error_history'])->toHaveCount(1);
 
     Queue::assertNotPushed(ValidatePatchJob::class);
 });

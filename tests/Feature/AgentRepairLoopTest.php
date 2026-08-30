@@ -1,7 +1,8 @@
 <?php
 
 use App\Agents\PatchAgent;
-use App\DTOs\ValidationResultDTO;
+use App\DTOs\AgentErrorDTO;
+use App\DTOs\AgentResultDTO;
 use App\Enums\IncidentStatus;
 use App\Jobs\GeneratePatchJob;
 use App\Models\Incident;
@@ -43,9 +44,11 @@ test('IncidentOrchestrator handles repair loop, retries on attempt 1 and 2, and 
     $orchestrator = app(IncidentOrchestrator::class);
 
     // Attempt 1: Validation fails -> transition to PATCHING and dispatch GeneratePatchJob
-    $failResult1 = ValidationResultDTO::failed(
-        feedback: 'Unit test test_auth_token failed with assertion error.',
-        testOutput: 'Failed asserting that false is true.',
+    $failResult1 = AgentResultDTO::failure(
+        code: AgentErrorDTO::TEST_FAILED,
+        message: 'Unit test test_auth_token failed with assertion error.',
+        details: ['test_output' => 'Failed asserting that false is true.'],
+        metadata: ['agent' => 'ValidationAgent'],
     );
     $orchestrator->handleValidationResult($incident, $failResult1);
 
@@ -54,7 +57,8 @@ test('IncidentOrchestrator handles repair loop, retries on attempt 1 and 2, and 
         ->and($incident->getPatchAttempts())->toBe(1)
         ->and($incident->getLatestValidationFeedback())->toBe('Unit test test_auth_token failed with assertion error.')
         ->and($incident->metadata['validation_history'])->toHaveCount(1)
-        ->and($incident->metadata['validation_history'][0]['attempt'])->toBe(1);
+        ->and($incident->metadata['validation_history'][0]['attempt'])->toBe(1)
+        ->and($incident->metadata['error_history'])->toHaveCount(1);
 
     Queue::assertPushed(GeneratePatchJob::class, 1);
 
@@ -62,9 +66,11 @@ test('IncidentOrchestrator handles repair loop, retries on attempt 1 and 2, and 
     $incident->update(['status' => IncidentStatus::VALIDATING]);
 
     // Attempt 2: Validation fails -> transition to PATCHING and dispatch GeneratePatchJob
-    $failResult2 = ValidationResultDTO::failed(
-        feedback: 'TypeError: Argument 1 passed must be of type string.',
-        testOutput: 'Fatal error: Uncaught TypeError.',
+    $failResult2 = AgentResultDTO::failure(
+        code: AgentErrorDTO::TEST_FAILED,
+        message: 'TypeError: Argument 1 passed must be of type string.',
+        details: ['test_output' => 'Fatal error: Uncaught TypeError.'],
+        metadata: ['agent' => 'ValidationAgent'],
     );
     $orchestrator->handleValidationResult($incident, $failResult2);
 
@@ -80,8 +86,10 @@ test('IncidentOrchestrator handles repair loop, retries on attempt 1 and 2, and 
     $incident->update(['status' => IncidentStatus::VALIDATING]);
 
     // Attempt 3: Validation fails -> hits MAX_PATCH_ITERATIONS threshold (3) -> transition to ESCALATED
-    $failResult3 = ValidationResultDTO::failed(
-        feedback: 'Memory limit exceeded during validation.',
+    $failResult3 = AgentResultDTO::failure(
+        code: AgentErrorDTO::BUILD_FAILED,
+        message: 'Memory limit exceeded during validation.',
+        metadata: ['agent' => 'ValidationAgent'],
     );
     $orchestrator->handleValidationResult($incident, $failResult3);
 
@@ -107,10 +115,13 @@ test('IncidentOrchestrator transitions to AWAITING_APPROVAL when validation pass
 
     $orchestrator = app(IncidentOrchestrator::class);
 
-    $passResult = ValidationResultDTO::success(
-        testOutput: 'All 15 tests passed',
-        buildOutput: 'Build success',
-        summary: 'Patch verified cleanly after 1 retry',
+    $passResult = AgentResultDTO::success(
+        data: [
+            'test_output' => 'All 15 tests passed',
+            'build_output' => 'Build success',
+            'summary' => 'Patch verified cleanly after 1 retry',
+        ],
+        metadata: ['agent' => 'ValidationAgent'],
     );
 
     $orchestrator->handleValidationResult($incident, $passResult);

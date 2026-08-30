@@ -2,9 +2,13 @@
 
 namespace App\Agents;
 
-use App\DTOs\ReproductionResultDTO;
+use App\DTOs\AgentErrorDTO;
+use App\DTOs\AgentResultDTO;
+use App\Exceptions\SandboxTimeoutException;
+use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
 use App\Services\Sandbox\SandboxManagerInterface;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -33,8 +37,9 @@ PROMPT;
     /**
      * Synthesize and execute a reproduction script inside an isolated sandbox.
      */
-    public function reproduce(Incident $incident): ReproductionResultDTO
+    public function reproduce(Incident $incident): AgentResultDTO
     {
+        $startTime = microtime(true);
         $workspaceId = 'repro-'.($incident->incident_number ? Str::slug($incident->incident_number) : (string) $incident->id).'-'.Str::random(6);
 
         $incident->loadMissing('vulnerability');
@@ -43,7 +48,14 @@ PROMPT;
             $plan = $this->synthesizeReproductionPlan($incident);
 
             if (! $plan['success']) {
-                return ReproductionResultDTO::error($plan['error'] ?? 'Failed to synthesize reproduction plan.');
+                $totalTime = round(microtime(true) - $startTime, 3);
+
+                return AgentResultDTO::failure(
+                    code: AgentErrorDTO::LLM_API_ERROR,
+                    message: $plan['error'] ?? 'Failed to synthesize reproduction plan.',
+                    details: $plan,
+                    metadata: ['agent' => 'ReproductionAgent', 'execution_time_seconds' => $totalTime],
+                );
             }
 
             $script = $plan['test_script'];
@@ -60,33 +72,60 @@ PROMPT;
             // 3. Execute command
             $processResult = $this->sandbox->runCommand($workspaceId, $command, timeout: 60);
 
+            $totalTime = round(microtime(true) - $startTime, 3);
             $output = $processResult->stdout."\n".$processResult->stderr;
             $isConfirmed = str_contains($output, $indicator);
 
             if ($isConfirmed) {
-                return ReproductionResultDTO::success(
-                    pocScript: $script,
-                    stdout: $processResult->stdout,
-                    stderr: $processResult->stderr,
-                    summary: "Vulnerability reproduced successfully: detected indicator [{$indicator}].",
-                    artifacts: ['command' => $command, 'exit_code' => $processResult->exitCode],
-                    time: $processResult->executionTimeSeconds,
+                return AgentResultDTO::success(
+                    data: [
+                        'reproduced' => true,
+                        'poc_script' => $script,
+                        'stdout' => $processResult->stdout,
+                        'stderr' => $processResult->stderr,
+                        'summary' => "Vulnerability reproduced successfully: detected indicator [{$indicator}].",
+                        'artifacts' => ['command' => $command, 'exit_code' => $processResult->exitCode],
+                        'execution_time_seconds' => $processResult->executionTimeSeconds,
+                    ],
+                    metadata: ['agent' => 'ReproductionAgent', 'execution_time_seconds' => $totalTime],
                 );
             }
 
-            return ReproductionResultDTO::failed(
-                reason: "Reproduction script ran but did not trigger vulnerability indicator [{$indicator}].",
-                stdout: $processResult->stdout,
-                stderr: $processResult->stderr,
-                exitCode: $processResult->exitCode,
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::REPRODUCTION_FAILED,
+                message: "Reproduction script ran but did not trigger vulnerability indicator [{$indicator}].",
+                details: [
+                    'stdout' => $processResult->stdout,
+                    'stderr' => $processResult->stderr,
+                    'exit_code' => $processResult->exitCode,
+                ],
+                metadata: ['agent' => 'ReproductionAgent', 'execution_time_seconds' => $totalTime],
             );
+        } catch (SandboxTimeoutException $e) {
+            $totalTime = round(microtime(true) - $startTime, 3);
+
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::SANDBOX_TIMEOUT,
+                message: $e->getMessage(),
+                details: ['timeout' => true],
+                metadata: ['agent' => 'ReproductionAgent', 'execution_time_seconds' => $totalTime],
+            );
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
         } catch (Throwable $e) {
+            $totalTime = round(microtime(true) - $startTime, 3);
+
             Log::error('Exception occurred during ReproductionAgent execution.', [
                 'incident_id' => $incident->id,
                 'error' => $e->getMessage(),
             ]);
 
-            return ReproductionResultDTO::error("Reproduction sandbox exception: {$e->getMessage()}");
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::LLM_API_ERROR,
+                message: "Reproduction sandbox exception: {$e->getMessage()}",
+                details: ['exception' => $e->getMessage()],
+                metadata: ['agent' => 'ReproductionAgent', 'execution_time_seconds' => $totalTime],
+            );
         } finally {
             // Guaranteed cleanup of sandbox workspace
             $this->sandbox->cleanup($workspaceId);
@@ -168,6 +207,10 @@ PROMPT;
                 'content-type' => 'application/json',
             ])->timeout(60)->post('https://api.anthropic.com/v1/messages', $payload);
 
+            if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
+                throw new TransientAgentInfrastructureException("Claude API transient status during reproduction [{$response->status()}]: {$response->body()}");
+            }
+
             if (! $response->successful()) {
                 return [
                     'success' => false,
@@ -190,6 +233,10 @@ PROMPT;
                 'success' => false,
                 'error' => 'Claude API did not call record_reproduction_plan tool.',
             ];
+        } catch (ConnectionException $e) {
+            throw new TransientAgentInfrastructureException("Network connection error during reproduction: {$e->getMessage()}", 0, $e);
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
         } catch (Throwable $e) {
             return [
                 'success' => false,

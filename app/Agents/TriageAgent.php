@@ -2,7 +2,8 @@
 
 namespace App\Agents;
 
-use App\DTOs\TriageResultDTO;
+use App\DTOs\AgentErrorDTO;
+use App\DTOs\AgentResultDTO;
 use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
 use Illuminate\Http\Client\ConnectionException;
@@ -31,8 +32,9 @@ PROMPT;
     /**
      * Analyze an incident using Claude API with forced structured tool calling.
      */
-    public function analyze(Incident $incident): TriageResultDTO
+    public function analyze(Incident $incident): AgentResultDTO
     {
+        $startTime = microtime(true);
         $apiKey = config('services.anthropic.key');
         $model = config('services.anthropic.model', 'claude-3-5-sonnet-latest');
         $version = config('services.anthropic.version', '2023-06-01');
@@ -42,7 +44,12 @@ PROMPT;
                 'incident_id' => $incident->id,
             ]);
 
-            return TriageResultDTO::failure('Anthropic API key is not configured.');
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::LLM_API_ERROR,
+                message: 'Anthropic API key is not configured.',
+                details: [],
+                metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => 0.0],
+            );
         }
 
         $incident->loadMissing('vulnerability');
@@ -105,6 +112,8 @@ PROMPT;
                 'content-type' => 'application/json',
             ])->timeout(60)->post('https://api.anthropic.com/v1/messages', $payload);
 
+            $executionTime = round(microtime(true) - $startTime, 3);
+
             if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
                 throw new TransientAgentInfrastructureException("Claude API transient status [{$response->status()}]: {$response->body()}");
             }
@@ -116,9 +125,11 @@ PROMPT;
                     'body' => $response->body(),
                 ]);
 
-                return TriageResultDTO::failure(
-                    errorMessage: "Anthropic API error: {$response->status()} - {$response->body()}",
-                    raw: $response->json() ?? [],
+                return AgentResultDTO::failure(
+                    code: AgentErrorDTO::LLM_API_ERROR,
+                    message: "Anthropic API error: {$response->status()} - {$response->body()}",
+                    details: $response->json() ?? [],
+                    metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => $executionTime],
                 );
             }
 
@@ -129,29 +140,36 @@ PROMPT;
                 if (($block['type'] ?? null) === 'tool_use' && ($block['name'] ?? null) === 'record_triage_analysis') {
                     $toolInput = $block['input'] ?? [];
 
-                    return TriageResultDTO::success(
+                    return AgentResultDTO::success(
                         data: $toolInput,
-                        raw: $responseData,
+                        metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => $executionTime],
                     );
                 }
             }
 
-            return TriageResultDTO::failure(
-                errorMessage: 'Claude API responded without calling the record_triage_analysis tool.',
-                raw: $responseData,
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::SCHEMA_VALIDATION_FAILED,
+                message: 'Claude API responded without calling the record_triage_analysis tool.',
+                details: $responseData ?? [],
+                metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => $executionTime],
             );
         } catch (ConnectionException $e) {
             throw new TransientAgentInfrastructureException("Network connection error during triage: {$e->getMessage()}", 0, $e);
         } catch (TransientAgentInfrastructureException $e) {
             throw $e;
         } catch (Throwable $e) {
+            $executionTime = round(microtime(true) - $startTime, 3);
+
             Log::error('Exception occurred during TriageAgent execution.', [
                 'incident_id' => $incident->id,
                 'exception' => $e->getMessage(),
             ]);
 
-            return TriageResultDTO::failure(
-                errorMessage: "TriageAgent execution error: {$e->getMessage()}",
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::LLM_API_ERROR,
+                message: "TriageAgent execution error: {$e->getMessage()}",
+                details: ['exception' => $e->getMessage()],
+                metadata: ['agent' => 'TriageAgent', 'execution_time_seconds' => $executionTime],
             );
         }
     }
@@ -166,7 +184,7 @@ PROMPT;
         $lines = [
             '# Vulnerability Incident Triage Request',
             "- Incident Number: {$incident->incident_number}",
-            "- Incident Title: {$incident->title}",
+            "- Title: {$incident->title}",
             "- Repository: {$incident->repository}",
             "- Environment: {$incident->environment}",
             '- Initial Severity: '.($incident->severity?->value ?? (string) $incident->severity),

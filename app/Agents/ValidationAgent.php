@@ -2,7 +2,9 @@
 
 namespace App\Agents;
 
-use App\DTOs\ValidationResultDTO;
+use App\DTOs\AgentErrorDTO;
+use App\DTOs\AgentResultDTO;
+use App\Exceptions\SandboxTimeoutException;
 use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
 use App\Services\Sandbox\SandboxManagerInterface;
@@ -35,8 +37,9 @@ PROMPT;
     /**
      * Validate a synthesized patch in an isolated sandbox.
      */
-    public function validate(Incident $incident): ValidationResultDTO
+    public function validate(Incident $incident): AgentResultDTO
     {
+        $startTime = microtime(true);
         $workspaceId = 'val-'.($incident->incident_number ? Str::slug($incident->incident_number) : (string) $incident->id).'-'.Str::random(6);
 
         $incident->loadMissing('vulnerability');
@@ -62,17 +65,32 @@ PROMPT;
                 testOutput: $testProcess->stdout,
                 buildOutput: "Build completed successfully. Exit code {$testProcess->exitCode}.",
                 testExitCode: $testProcess->exitCode,
+                startTime: $startTime,
+            );
+        } catch (SandboxTimeoutException $e) {
+            $totalTime = round(microtime(true) - $startTime, 3);
+
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::SANDBOX_TIMEOUT,
+                message: $e->getMessage(),
+                details: ['timeout' => true],
+                metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
             );
         } catch (TransientAgentInfrastructureException $e) {
             throw $e;
         } catch (Throwable $e) {
+            $totalTime = round(microtime(true) - $startTime, 3);
+
             Log::error('Exception occurred during ValidationAgent execution.', [
                 'incident_id' => $incident->id,
                 'error' => $e->getMessage(),
             ]);
 
-            return ValidationResultDTO::failed(
-                feedback: "Validation sandbox execution exception: {$e->getMessage()}",
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::LLM_API_ERROR,
+                message: "Validation sandbox execution exception: {$e->getMessage()}",
+                details: ['exception' => $e->getMessage()],
+                metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
             );
         } finally {
             // Guaranteed cleanup of sandbox workspace
@@ -88,24 +106,36 @@ PROMPT;
         string $testOutput,
         string $buildOutput,
         int $testExitCode,
-    ): ValidationResultDTO {
+        float $startTime,
+    ): AgentResultDTO {
         $apiKey = config('services.anthropic.key');
         $model = config('services.anthropic.model', 'claude-3-5-sonnet-latest');
         $version = config('services.anthropic.version', '2023-06-01');
 
         if (empty($apiKey)) {
+            $totalTime = round(microtime(true) - $startTime, 3);
+
             if ($testExitCode === 0) {
-                return ValidationResultDTO::success(
-                    testOutput: $testOutput,
-                    buildOutput: $buildOutput,
-                    summary: "All automated test suites and security scans passed for {$incident->incident_number}.",
+                return AgentResultDTO::success(
+                    data: [
+                        'passed' => true,
+                        'test_output' => $testOutput,
+                        'build_output' => $buildOutput,
+                        'summary' => "All automated test suites and security scans passed for {$incident->incident_number}.",
+                    ],
+                    metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
                 );
             }
 
-            return ValidationResultDTO::failed(
-                feedback: "Automated test runner failed with exit code {$testExitCode}: {$testOutput}",
-                testOutput: $testOutput,
-                buildOutput: $buildOutput,
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::TEST_FAILED,
+                message: "Automated test runner failed with exit code {$testExitCode}: {$testOutput}",
+                details: [
+                    'test_output' => $testOutput,
+                    'build_output' => $buildOutput,
+                    'exit_code' => $testExitCode,
+                ],
+                metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
             );
         }
 
@@ -170,15 +200,22 @@ PROMPT;
                 'content-type' => 'application/json',
             ])->timeout(60)->post('https://api.anthropic.com/v1/messages', $payload);
 
+            $totalTime = round(microtime(true) - $startTime, 3);
+
             if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
                 throw new TransientAgentInfrastructureException("Claude API transient status during validation [{$response->status()}]: {$response->body()}");
             }
 
             if (! $response->successful()) {
-                return ValidationResultDTO::failed(
-                    feedback: "Claude API error during validation: {$response->status()} - {$response->body()}",
-                    testOutput: $testOutput,
-                    buildOutput: $buildOutput,
+                return AgentResultDTO::failure(
+                    code: AgentErrorDTO::LLM_API_ERROR,
+                    message: "Claude API error during validation: {$response->status()} - {$response->body()}",
+                    details: [
+                        'test_output' => $testOutput,
+                        'build_output' => $buildOutput,
+                        'response' => $response->json() ?? [],
+                    ],
+                    metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
                 );
             }
 
@@ -191,37 +228,55 @@ PROMPT;
                     $passed = (bool) ($input['passed'] ?? false);
 
                     if ($passed) {
-                        return ValidationResultDTO::success(
-                            testOutput: $testOutput,
-                            buildOutput: $buildOutput,
-                            summary: $input['summary'] ?? "Validation succeeded for {$incident->incident_number}.",
-                            raw: $responseData,
+                        return AgentResultDTO::success(
+                            data: [
+                                'passed' => true,
+                                'test_output' => $testOutput,
+                                'build_output' => $buildOutput,
+                                'summary' => $input['summary'] ?? "Validation succeeded for {$incident->incident_number}.",
+                            ],
+                            metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
                         );
                     }
 
-                    return ValidationResultDTO::failed(
-                        feedback: $input['feedback'] ?? 'Validation tests or security checks failed.',
-                        testOutput: $testOutput,
-                        buildOutput: $buildOutput,
-                        raw: $responseData,
+                    return AgentResultDTO::failure(
+                        code: AgentErrorDTO::TEST_FAILED,
+                        message: $input['feedback'] ?? 'Validation tests or security checks failed.',
+                        details: [
+                            'test_output' => $testOutput,
+                            'build_output' => $buildOutput,
+                            'analysis' => $input,
+                        ],
+                        metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
                     );
                 }
             }
 
-            return ValidationResultDTO::failed(
-                feedback: 'Claude API did not return record_validation_verdict tool response.',
-                testOutput: $testOutput,
-                buildOutput: $buildOutput,
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::SCHEMA_VALIDATION_FAILED,
+                message: 'Claude API did not return record_validation_verdict tool response.',
+                details: [
+                    'test_output' => $testOutput,
+                    'build_output' => $buildOutput,
+                ],
+                metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
             );
         } catch (ConnectionException $e) {
             throw new TransientAgentInfrastructureException("Network connection error during validation: {$e->getMessage()}", 0, $e);
         } catch (TransientAgentInfrastructureException $e) {
             throw $e;
         } catch (Throwable $e) {
-            return ValidationResultDTO::failed(
-                feedback: "Validation evaluation exception: {$e->getMessage()}",
-                testOutput: $testOutput,
-                buildOutput: $buildOutput,
+            $totalTime = round(microtime(true) - $startTime, 3);
+
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::LLM_API_ERROR,
+                message: "Validation evaluation exception: {$e->getMessage()}",
+                details: [
+                    'test_output' => $testOutput,
+                    'build_output' => $buildOutput,
+                    'exception' => $e->getMessage(),
+                ],
+                metadata: ['agent' => 'ValidationAgent', 'execution_time_seconds' => $totalTime],
             );
         }
     }

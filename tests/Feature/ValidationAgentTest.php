@@ -1,7 +1,7 @@
 <?php
 
 use App\Agents\ValidationAgent;
-use App\DTOs\ValidationResultDTO;
+use App\DTOs\AgentResultDTO;
 use App\Enums\IncidentStatus;
 use App\Jobs\GeneratePatchJob;
 use App\Jobs\ValidatePatchJob;
@@ -16,27 +16,6 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config()->set('services.anthropic.key', null);
-});
-
-test('ValidationResultDTO structures success and failure states', function () {
-    $success = ValidationResultDTO::success(
-        testOutput: '15 passed',
-        buildOutput: 'Build OK',
-        summary: 'All checks passed',
-    );
-
-    expect($success->passed)->toBeTrue()
-        ->and($success->testsPassed)->toBeTrue()
-        ->and($success->buildPassed)->toBeTrue()
-        ->and($success->summary)->toBe('All checks passed');
-
-    $failed = ValidationResultDTO::failed(
-        feedback: 'Unit test failed: unexpected token',
-        testOutput: '1 failed, 14 passed',
-    );
-
-    expect($failed->passed)->toBeFalse()
-        ->and($failed->feedback)->toBe('Unit test failed: unexpected token');
 });
 
 test('ValidationAgent runs sandbox validation and returns success when tests pass', function () {
@@ -62,10 +41,10 @@ test('ValidationAgent runs sandbox validation and returns success when tests pas
     $agent = new ValidationAgent($mockSandbox);
     $result = $agent->validate($incident);
 
-    expect($result)->toBeInstanceOf(ValidationResultDTO::class)
-        ->and($result->passed)->toBeTrue()
-        ->and($result->testsPassed)->toBeTrue()
-        ->and($result->summary)->toContain('passed');
+    expect($result)->toBeInstanceOf(AgentResultDTO::class)
+        ->and($result->success)->toBeTrue()
+        ->and($result->status)->toBe('completed')
+        ->and($result->data['summary'])->toContain('passed');
 });
 
 test('ValidationAgent evaluates Claude validation tool response when configured', function () {
@@ -106,8 +85,8 @@ test('ValidationAgent evaluates Claude validation tool response when configured'
     $agent = new ValidationAgent($mockSandbox);
     $result = $agent->validate($incident);
 
-    expect($result->passed)->toBeTrue()
-        ->and($result->summary)->toBe('Comprehensive regression validation verified.');
+    expect($result->success)->toBeTrue()
+        ->and($result->data['summary'])->toBe('Comprehensive regression validation verified.');
 });
 
 test('ValidatePatchJob transitions to AWAITING_APPROVAL when validation passes', function () {

@@ -2,10 +2,8 @@
 
 namespace App\Workflows;
 
-use App\DTOs\PatchResultDTO;
-use App\DTOs\ReproductionResultDTO;
-use App\DTOs\TriageResultDTO;
-use App\DTOs\ValidationResultDTO;
+use App\DTOs\AgentErrorDTO;
+use App\DTOs\AgentResultDTO;
 use App\Enums\IncidentPriority;
 use App\Enums\IncidentStatus;
 use App\Enums\VulnerabilitySeverity;
@@ -65,12 +63,13 @@ class IncidentOrchestrator
     /**
      * Handle the structured result from TriageAgent.
      */
-    public function handleTriageResult(Incident $incident, TriageResultDTO $result): void
+    public function handleTriageResult(Incident $incident, AgentResultDTO $result): void
     {
-        if ($result->isValid()) {
-            $severityEnum = VulnerabilitySeverity::tryFrom(strtolower((string) $result->severity)) ?? VulnerabilitySeverity::MEDIUM;
+        if ($result->success) {
+            $data = $result->data;
+            $severityEnum = VulnerabilitySeverity::tryFrom(strtolower((string) ($data['severity'] ?? ''))) ?? VulnerabilitySeverity::MEDIUM;
 
-            $priorityValue = strtolower((string) $result->priority);
+            $priorityValue = strtolower((string) ($data['priority'] ?? ''));
             $priorityEnum = match ($priorityValue) {
                 'critical', 'urgent' => IncidentPriority::URGENT,
                 'high' => IncidentPriority::HIGH,
@@ -81,9 +80,9 @@ class IncidentOrchestrator
             $incident->severity = $severityEnum;
             $incident->priority = $priorityEnum;
             $incident->metadata = array_merge($incident->metadata ?? [], [
-                'production_exposed' => $result->productionExposed,
-                'affected_component' => $result->affectedComponent,
-                'triage_reason' => $result->reason,
+                'production_exposed' => (bool) ($data['production_exposed'] ?? false),
+                'affected_component' => (string) ($data['affected_component'] ?? ''),
+                'triage_reason' => (string) ($data['reason'] ?? ''),
                 'triaged_at' => now()->toIso8601String(),
             ]);
             $incident->save();
@@ -91,20 +90,22 @@ class IncidentOrchestrator
             $this->stateMachine->transition(
                 incident: $incident,
                 targetStatus: IncidentStatus::PRIORITIZED,
-                reason: $result->reason,
+                reason: (string) ($data['reason'] ?? 'Triage analysis completed.'),
                 actorType: 'agent',
                 actorId: 'triage-agent',
                 metadata: [
-                    'severity' => $result->severity,
-                    'priority' => $result->priority,
-                    'production_exposed' => $result->productionExposed,
-                    'affected_component' => $result->affectedComponent,
+                    'severity' => $data['severity'] ?? null,
+                    'priority' => $data['priority'] ?? null,
+                    'production_exposed' => $data['production_exposed'] ?? null,
+                    'affected_component' => $data['affected_component'] ?? null,
                 ],
             );
 
             ReproduceIncidentJob::dispatch($incident)->onQueue('incidents');
         } else {
-            $failureReason = 'Triage failed: '.($result->errorMessage ?? 'Missing required fields or invalid triage structure.');
+            $this->recordError($incident, $result);
+            $error = $result->error;
+            $failureReason = "Triage failed [{$error?->code}]: ".($error?->message ?? 'Missing required fields or invalid triage structure.');
 
             $this->stateMachine->transition(
                 incident: $incident,
@@ -113,7 +114,8 @@ class IncidentOrchestrator
                 actorType: 'agent',
                 actorId: 'triage-agent',
                 metadata: [
-                    'error' => $result->errorMessage,
+                    'error_code' => $error?->code,
+                    'error_message' => $error?->message,
                 ],
             );
         }
@@ -122,15 +124,16 @@ class IncidentOrchestrator
     /**
      * Handle the structured result from ReproductionAgent.
      */
-    public function handleReproductionResult(Incident $incident, ReproductionResultDTO $result): void
+    public function handleReproductionResult(Incident $incident, AgentResultDTO $result): void
     {
-        if ($result->reproduced) {
+        if ($result->success) {
+            $data = $result->data;
             $incident->metadata = array_merge($incident->metadata ?? [], [
-                'poc_script' => $result->pocScript,
-                'reproduction_stdout' => $result->stdout,
-                'reproduction_stderr' => $result->stderr,
-                'reproduction_summary' => $result->summary,
-                'reproduction_time_seconds' => $result->executionTimeSeconds,
+                'poc_script' => $data['poc_script'] ?? null,
+                'reproduction_stdout' => $data['stdout'] ?? null,
+                'reproduction_stderr' => $data['stderr'] ?? null,
+                'reproduction_summary' => $data['summary'] ?? null,
+                'reproduction_time_seconds' => $data['execution_time_seconds'] ?? 0.0,
                 'reproduced_at' => now()->toIso8601String(),
             ]);
             $incident->save();
@@ -138,66 +141,61 @@ class IncidentOrchestrator
             $this->stateMachine->transition(
                 incident: $incident,
                 targetStatus: IncidentStatus::REPRODUCED,
-                reason: $result->summary ?? 'Vulnerability successfully reproduced in isolated sandbox.',
+                reason: (string) ($data['summary'] ?? 'Vulnerability successfully reproduced in isolated sandbox.'),
                 actorType: 'agent',
                 actorId: 'reproduction-agent',
                 metadata: [
-                    'artifacts' => $result->artifacts,
-                    'time_seconds' => $result->executionTimeSeconds,
+                    'artifacts' => $data['artifacts'] ?? [],
+                    'time_seconds' => $data['execution_time_seconds'] ?? 0.0,
                 ],
             );
 
             GeneratePatchJob::dispatch($incident)->onQueue('incidents');
-        } elseif ($result->sandboxSuccess) {
-            $incident->metadata = array_merge($incident->metadata ?? [], [
-                'reproduction_failure_reason' => $result->failureReason,
-                'reproduction_stdout' => $result->stdout,
-                'reproduction_stderr' => $result->stderr,
-            ]);
-            $incident->save();
-
-            $this->stateMachine->transition(
-                incident: $incident,
-                targetStatus: IncidentStatus::FAILED,
-                reason: 'Reproduction failed: '.($result->failureReason ?? 'Vulnerability behavior not observed in sandbox.'),
-                actorType: 'agent',
-                actorId: 'reproduction-agent',
-                metadata: [
-                    'failure_reason' => $result->failureReason,
-                    'exit_code' => $result->exitCode,
-                ],
-            );
         } else {
-            $incident->metadata = array_merge($incident->metadata ?? [], [
-                'reproduction_error' => $result->failureReason,
-            ]);
-            $incident->save();
+            $this->recordError($incident, $result);
+            $error = $result->error;
 
-            $this->stateMachine->transition(
-                incident: $incident,
-                targetStatus: IncidentStatus::ESCALATED,
-                reason: 'Reproduction sandbox error: '.($result->failureReason ?? 'Sandbox environment failed to initialize or execute.'),
-                actorType: 'agent',
-                actorId: 'reproduction-agent',
-                metadata: [
-                    'error' => $result->failureReason,
-                ],
-            );
+            if ($error?->code === AgentErrorDTO::REPRODUCTION_FAILED) {
+                $this->stateMachine->transition(
+                    incident: $incident,
+                    targetStatus: IncidentStatus::FAILED,
+                    reason: 'Reproduction failed: '.($error?->message ?? 'Vulnerability behavior not observed in sandbox.'),
+                    actorType: 'agent',
+                    actorId: 'reproduction-agent',
+                    metadata: [
+                        'error_code' => $error?->code,
+                        'details' => $error?->details,
+                    ],
+                );
+            } else {
+                $this->stateMachine->transition(
+                    incident: $incident,
+                    targetStatus: IncidentStatus::ESCALATED,
+                    reason: "Reproduction error [{$error?->code}]: ".($error?->message ?? 'Sandbox environment failed to initialize or execute.'),
+                    actorType: 'agent',
+                    actorId: 'reproduction-agent',
+                    metadata: [
+                        'error_code' => $error?->code,
+                        'error_message' => $error?->message,
+                    ],
+                );
+            }
         }
     }
 
     /**
      * Handle the structured result from PatchAgent.
      */
-    public function handlePatchResult(Incident $incident, PatchResultDTO $result): void
+    public function handlePatchResult(Incident $incident, AgentResultDTO $result): void
     {
-        if ($result->isValid()) {
-            $incident->root_cause = $result->rootCause;
+        if ($result->success && ! empty($result->data['diff']) && ! empty($result->data['root_cause'])) {
+            $data = $result->data;
+            $incident->root_cause = (string) ($data['root_cause'] ?? '');
             $incident->metadata = array_merge($incident->metadata ?? [], [
-                'fix_summary' => $result->fixSummary,
-                'diff' => $result->diff,
-                'changed_files' => $result->changedFiles,
-                'tests_added' => $result->testsAdded,
+                'fix_summary' => $data['fix_summary'] ?? '',
+                'diff' => $data['diff'] ?? '',
+                'changed_files' => $data['changed_files'] ?? [],
+                'tests_added' => $data['tests_added'] ?? [],
                 'patched_at' => now()->toIso8601String(),
             ]);
             $incident->save();
@@ -205,46 +203,48 @@ class IncidentOrchestrator
             $this->stateMachine->transition(
                 incident: $incident,
                 targetStatus: IncidentStatus::VALIDATING,
-                reason: $result->fixSummary ?? 'Security patch and regression tests synthesized.',
+                reason: (string) ($data['fix_summary'] ?? 'Security patch and regression tests synthesized.'),
                 actorType: 'agent',
                 actorId: 'patch-agent',
                 metadata: [
-                    'changed_files' => $result->changedFiles,
-                    'tests_added' => $result->testsAdded,
+                    'changed_files' => $data['changed_files'] ?? [],
+                    'tests_added' => $data['tests_added'] ?? [],
                 ],
             );
 
             ValidatePatchJob::dispatch($incident)->onQueue('incidents');
         } else {
-            $incident->metadata = array_merge($incident->metadata ?? [], [
-                'patch_failure_reason' => $result->failureReason,
-            ]);
-            $incident->save();
+            $this->recordError($incident, $result);
+            $error = $result->error;
+            $code = $error?->code ?? AgentErrorDTO::PATCH_SYNTHESIS_FAILED;
+            $message = $error?->message ?? 'Invalid patch schema or empty diff output.';
 
             $this->stateMachine->transition(
                 incident: $incident,
                 targetStatus: IncidentStatus::ESCALATED,
-                reason: 'Patch synthesis failed: '.($result->failureReason ?? 'Invalid patch schema or empty diff output.'),
+                reason: "Patch synthesis failed [{$code}]: {$message}",
                 actorType: 'agent',
                 actorId: 'patch-agent',
                 metadata: [
-                    'error' => $result->failureReason,
+                    'error_code' => $code,
+                    'error_message' => $message,
                 ],
             );
         }
     }
 
     /**
-     * Handle the structured result from ValidationAgent with repair feedback loop & max attempts boundary.
+     * Handle the structured result from ValidationAgent with unified failure & repair loop.
      */
-    public function handleValidationResult(Incident $incident, ValidationResultDTO $result): void
+    public function handleValidationResult(Incident $incident, AgentResultDTO $result): void
     {
-        if ($result->passed) {
+        if ($result->success) {
+            $data = $result->data;
             $attempts = $incident->getPatchAttempts();
             $incident->metadata = array_merge($incident->metadata ?? [], [
-                'validation_test_output' => $result->testOutput,
-                'validation_build_output' => $result->buildOutput,
-                'validation_summary' => $result->summary,
+                'validation_test_output' => $data['test_output'] ?? '',
+                'validation_build_output' => $data['build_output'] ?? '',
+                'validation_summary' => $data['summary'] ?? '',
                 'validated_at' => now()->toIso8601String(),
             ]);
             $incident->save();
@@ -256,33 +256,35 @@ class IncidentOrchestrator
                 actorType: 'agent',
                 actorId: 'validation-agent',
                 metadata: [
-                    'summary' => $result->summary,
+                    'summary' => $data['summary'] ?? '',
                     'attempts' => $attempts,
                 ],
             );
         } else {
+            $this->recordError($incident, $result);
+            $error = $result->error;
             $currentAttempt = $incident->incrementPatchAttempts();
 
             $historyItem = [
                 'attempt' => $currentAttempt,
                 'diff' => $incident->metadata['diff'] ?? null,
-                'feedback' => $result->feedback,
-                'test_output' => $result->testOutput,
-                'build_output' => $result->buildOutput,
+                'feedback' => $error?->message,
+                'test_output' => $error?->details['test_output'] ?? null,
+                'build_output' => $error?->details['build_output'] ?? null,
                 'failed_at' => now()->toIso8601String(),
             ];
             $history = $incident->metadata['validation_history'] ?? [];
             $history[] = $historyItem;
 
             $incident->metadata = array_merge($incident->metadata ?? [], [
-                'last_validation_feedback' => $result->feedback,
-                'validation_test_output' => $result->testOutput,
-                'validation_build_output' => $result->buildOutput,
+                'last_validation_feedback' => $error?->message,
                 'validation_history' => $history,
             ]);
             $incident->save();
 
-            if ($currentAttempt < self::MAX_PATCH_ITERATIONS) {
+            $isRecoverable = in_array($error?->code, [AgentErrorDTO::TEST_FAILED, AgentErrorDTO::BUILD_FAILED], true);
+
+            if ($isRecoverable && $currentAttempt < self::MAX_PATCH_ITERATIONS) {
                 $this->stateMachine->transition(
                     incident: $incident,
                     targetStatus: IncidentStatus::PATCHING,
@@ -290,25 +292,52 @@ class IncidentOrchestrator
                     actorType: 'agent',
                     actorId: 'validation-agent',
                     metadata: [
-                        'feedback' => $result->feedback,
+                        'feedback' => $error?->message,
                         'attempt' => $currentAttempt,
+                        'error_code' => $error?->code,
                     ],
                 );
 
                 GeneratePatchJob::dispatch($incident)->onQueue('incidents');
             } else {
+                $escalateReason = ($currentAttempt >= self::MAX_PATCH_ITERATIONS)
+                    ? 'Exhausted maximum patch attempts ('.self::MAX_PATCH_ITERATIONS.'). Manual intervention required.'
+                    : "Validation error [{$error?->code}]: ".($error?->message ?? 'Validation failed.');
+
                 $this->stateMachine->transition(
                     incident: $incident,
                     targetStatus: IncidentStatus::ESCALATED,
-                    reason: 'Exhausted maximum patch attempts ('.self::MAX_PATCH_ITERATIONS.'). Manual intervention required.',
+                    reason: $escalateReason,
                     actorType: 'agent',
                     actorId: 'validation-agent',
                     metadata: [
-                        'feedback' => $result->feedback,
+                        'error_code' => ($currentAttempt >= self::MAX_PATCH_ITERATIONS) ? AgentErrorDTO::MAX_ATTEMPTS_EXCEEDED : $error?->code,
+                        'feedback' => $error?->message,
                         'attempts' => $currentAttempt,
                     ],
                 );
             }
         }
+    }
+
+    /**
+     * Record agent error object into incident error history.
+     */
+    protected function recordError(Incident $incident, AgentResultDTO $result): void
+    {
+        if (! $result->error) {
+            return;
+        }
+
+        $errorHistory = $incident->metadata['error_history'] ?? [];
+        $errorHistory[] = array_merge($result->error->toArray(), [
+            'timestamp' => now()->toIso8601String(),
+            'metadata' => $result->metadata,
+        ]);
+
+        $incident->metadata = array_merge($incident->metadata ?? [], [
+            'error_history' => $errorHistory,
+        ]);
+        $incident->save();
     }
 }

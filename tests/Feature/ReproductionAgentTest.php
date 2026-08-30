@@ -1,7 +1,7 @@
 <?php
 
 use App\Agents\ReproductionAgent;
-use App\DTOs\ReproductionResultDTO;
+use App\DTOs\AgentResultDTO;
 use App\Enums\IncidentStatus;
 use App\Jobs\GeneratePatchJob;
 use App\Jobs\ReproduceIncidentJob;
@@ -64,10 +64,11 @@ test('ReproductionAgent successfully reproduces vulnerability when confirmation 
     $agent = new ReproductionAgent($mockSandbox);
     $result = $agent->reproduce($incident);
 
-    expect($result)->toBeInstanceOf(ReproductionResultDTO::class)
-        ->and($result->reproduced)->toBeTrue()
-        ->and($result->sandboxSuccess)->toBeTrue()
-        ->and($result->summary)->toContain('Vulnerability reproduced successfully');
+    expect($result)->toBeInstanceOf(AgentResultDTO::class)
+        ->and($result->success)->toBeTrue()
+        ->and($result->status)->toBe('completed')
+        ->and($result->data['reproduced'])->toBeTrue()
+        ->and($result->data['summary'])->toContain('Vulnerability reproduced successfully');
 });
 
 test('ReproductionAgent returns failed DTO when vulnerability indicator is missing', function () {
@@ -88,9 +89,9 @@ test('ReproductionAgent returns failed DTO when vulnerability indicator is missi
     $agent = new ReproductionAgent($mockSandbox);
     $result = $agent->reproduce($incident);
 
-    expect($result->reproduced)->toBeFalse()
-        ->and($result->sandboxSuccess)->toBeTrue()
-        ->and($result->failureReason)->toContain('did not trigger vulnerability indicator');
+    expect($result->success)->toBeFalse()
+        ->and($result->error?->code)->toBe('REPRODUCTION_FAILED')
+        ->and($result->error?->message)->toContain('did not trigger vulnerability indicator');
 });
 
 test('ReproduceIncidentJob executes reproduction and transitions incident to REPRODUCED and dispatches GeneratePatchJob', function () {
@@ -149,7 +150,7 @@ test('ReproduceIncidentJob transitions incident to FAILED when reproduction test
     $incident->refresh();
 
     expect($incident->status)->toBe(IncidentStatus::FAILED)
-        ->and($incident->metadata['reproduction_failure_reason'])->not->toBeNull();
+        ->and($incident->metadata['error_history'])->toHaveCount(1);
 
     Queue::assertNotPushed(GeneratePatchJob::class);
 });
