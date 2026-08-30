@@ -12,6 +12,8 @@ use App\Exceptions\MCP\UnauthorizedToolException;
 use App\Models\Incident;
 use App\Models\ToolExecution;
 use App\Services\AuditLogger;
+use App\Services\MCP\DTOs\ToolErrorResponseDTO;
+use App\Services\MCP\Guards\AgentExecutionBudgetGuard;
 use App\Services\MCP\Guards\HitlApprovalGuard;
 use App\Services\MCP\Guards\RepositoryAccessGuard;
 use App\Services\MCP\Guards\SandboxExecutionGuard;
@@ -33,6 +35,7 @@ class MCPToolGateway
         protected ?SandboxExecutionGuard $sandboxGuard = null,
         protected ?ToolRiskLevelGuard $riskLevelGuard = null,
         protected ?HitlApprovalGuard $hitlGuard = null,
+        protected ?AgentExecutionBudgetGuard $budgetGuard = null,
     ) {
         $this->permissionService ??= app(MCPPermissionService::class);
         $this->registry ??= app(ToolRegistry::class);
@@ -41,11 +44,39 @@ class MCPToolGateway
         $this->sandboxGuard ??= app(SandboxExecutionGuard::class);
         $this->riskLevelGuard ??= app(ToolRiskLevelGuard::class);
         $this->hitlGuard ??= app(HitlApprovalGuard::class);
+        $this->budgetGuard ??= app(AgentExecutionBudgetGuard::class);
+    }
+
+    /**
+     * Resilient invocation method that executes a tool and catches any exception,
+     * returning a standardized JSON error envelope to LLM callers without crashing the loop.
+     *
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    public function invoke(
+        AgentRole $role,
+        string $toolName,
+        array $arguments,
+        Incident $context,
+        ?int $agentRunId = null,
+    ): array {
+        try {
+            return $this->execute(
+                role: $role,
+                toolName: $toolName,
+                arguments: $arguments,
+                context: $context,
+                agentRunId: $agentRunId,
+            );
+        } catch (Throwable $e) {
+            return $this->formatErrorResponse($e, $toolName, $context);
+        }
     }
 
     /**
      * Execute a tool through the strict non-bypassable MCP Tool Gateway pipeline with repository & sandbox isolation,
-     * HITL approval gates, immutable tool execution logging, and zero-trust credential isolation.
+     * HITL approval gates, budget enforcement, immutable tool execution logging, and zero-trust credential isolation.
      *
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
@@ -72,6 +103,7 @@ class MCPToolGateway
             'incident_id' => $context->id,
             'tool' => $toolName,
             'role' => $role->value,
+            'agent_run_id' => $agentRunId,
         ]);
 
         $redactedArgs = $this->redactSensitiveValues($arguments);
@@ -113,22 +145,25 @@ class MCPToolGateway
                 throw new UnauthorizedToolException($role, $toolName);
             }
 
-            // 4. Strict Repository Boundary Isolation Guard
+            // 4. Operational Budget & Quota Enforcement (Tool count, execution timeout, sandbox instances)
+            $this->budgetGuard->validatePreExecution($role, $tool, $context, $agentRunId);
+
+            // 5. Strict Repository Boundary Isolation Guard
             $this->repositoryGuard->validate($context, $arguments, $toolName);
 
-            // 5. Sandbox Security Boundary & Breakout Guard
+            // 6. Sandbox Security Boundary & Breakout Guard
             $this->sandboxGuard->validate($context, $arguments, $toolName);
 
-            // 6. Multi-Tier Tool Risk Level Evaluation
+            // 7. Multi-Tier Tool Risk Level Evaluation
             $this->riskLevelGuard->evaluate($tool, $arguments, $context);
 
-            // 7. Human-In-The-Loop (HITL) Execution Gate
+            // 8. Human-In-The-Loop (HITL) Execution Gate
             $this->hitlGuard->validate($tool, $arguments, $context);
 
             $scopeStr = $tool->requiredPermission()->value;
             $scopeEnum = ToolScope::tryFrom($scopeStr) ?? ToolScope::GITHUB_READ;
 
-            // 8. ABAC Resource-Level Constraint Validation
+            // 9. ABAC Resource-Level Constraint Validation
             try {
                 $this->permissionService->validateResourceConstraints($scopeEnum, $arguments, $context);
             } catch (ResourceAccessDeniedException $e) {
@@ -156,21 +191,23 @@ class MCPToolGateway
                 throw $e;
             }
 
-            // 9. Validate Input Arguments against Schema
+            // 10. Validate Input Arguments against Schema
             $this->validateArguments($toolName, $tool->parametersSchema(), $arguments);
 
-            // 10. Monitored Tool Execution (Secrets injected securely in backend driver)
+            // 11. Monitored Tool Execution (Secrets injected securely in backend driver)
             $rawOutput = $tool->execute($arguments, $context);
 
-            // 11. Sanitize, Truncate, and Redact Secrets
+            // 12. Sanitize, Truncate, and Redact Secrets
             $sanitizedOutput = $this->sanitizeResponse($rawOutput);
+            $budgetBoundedOutput = $this->budgetGuard->truncateOutput($sanitizedOutput, $role);
+
             $executionTime = round(microtime(true) - $startTime, 3);
             $durationMs = round((microtime(true) - $startTime) * 1000, 2);
 
-            // 12. Finalize tool_executions record as SUCCESS
-            $this->finalizeExecutionRecord($executionRecord, 'success', $sanitizedOutput, $startTime);
+            // 13. Finalize tool_executions record as SUCCESS
+            $this->finalizeExecutionRecord($executionRecord, 'success', $budgetBoundedOutput, $startTime);
 
-            // 13. Record Audit Event
+            // 14. Record Audit Event
             if (config('mcp.security.audit_invocations', true)) {
                 AuditLogger::logSystemAction(
                     event: 'mcp_gateway.tool_executed',
@@ -192,7 +229,7 @@ class MCPToolGateway
                 'tool' => $toolName,
                 'role' => $role->value,
                 'risk_level' => $riskLevel,
-                'data' => $sanitizedOutput,
+                'data' => $budgetBoundedOutput,
                 'execution_time_seconds' => $executionTime,
                 'duration_ms' => $durationMs,
             ];
@@ -211,13 +248,31 @@ class MCPToolGateway
             throw $e;
         } catch (Throwable $e) {
             if ($executionRecord && $executionRecord->status === 'running') {
-                $this->finalizeExecutionRecord($executionRecord, 'failed', [
+                $status = ($e instanceof UnauthorizedToolException || $e instanceof ResourceAccessDeniedException)
+                    ? 'denied'
+                    : 'failed';
+
+                $this->finalizeExecutionRecord($executionRecord, $status, [
                     'error' => $e->getMessage(),
+                    'exception' => class_basename($e),
                 ], $startTime);
             }
 
             throw $e;
         }
+    }
+
+    /**
+     * Format a standard structured error envelope for agent consumption.
+     *
+     * @return array{success: false, error: array{code: string, message: string, retryable: bool, details: array<string, mixed>}}
+     */
+    public function formatErrorResponse(Throwable $e, string $toolName, Incident $context): array
+    {
+        return ToolErrorResponseDTO::fromException($e, [
+            'tool_name' => $toolName,
+            'incident_number' => $context->incident_number,
+        ])->toArray();
     }
 
     /**

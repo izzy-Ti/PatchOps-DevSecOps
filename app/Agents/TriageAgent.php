@@ -209,36 +209,25 @@ PROMPT;
                             $toolName = $block['name'];
                             $toolInput = $block['input'] ?? [];
 
-                            // Route through MCP Tool Gateway
-                            try {
-                                $gatewayResult = $this->gateway->execute(
-                                    role: AgentRole::TRIAGE,
-                                    toolName: $toolName,
-                                    arguments: $toolInput,
-                                    context: $incident,
-                                    agentRunId: $agentRunId,
-                                );
+                            // Route through MCP Tool Gateway with structured error normalization
+                            $gatewayResult = $this->gateway->invoke(
+                                role: AgentRole::TRIAGE,
+                                toolName: $toolName,
+                                arguments: $toolInput,
+                                context: $incident,
+                                agentRunId: $agentRunId,
+                            );
 
-                                $toolData = $gatewayResult['data'] ?? $gatewayResult;
-                                $observations[$toolName] = $toolData;
+                            $isSuccess = (bool) ($gatewayResult['success'] ?? false);
+                            $toolData = $isSuccess ? ($gatewayResult['data'] ?? $gatewayResult) : $gatewayResult;
+                            $observations[$toolName] = $toolData;
 
-                                $toolResultBlocks[] = [
-                                    'type' => 'tool_result',
-                                    'tool_use_id' => $toolUseId,
-                                    'is_error' => false,
-                                    'content' => json_encode($toolData, JSON_UNESCAPED_SLASHES),
-                                ];
-                            } catch (Throwable $toolEx) {
-                                Log::warning("TriageAgent tool [{$toolName}] failed via gateway: {$toolEx->getMessage()}");
-                                $observations[$toolName] = ['error' => $toolEx->getMessage()];
-
-                                $toolResultBlocks[] = [
-                                    'type' => 'tool_result',
-                                    'tool_use_id' => $toolUseId,
-                                    'is_error' => true,
-                                    'content' => "Tool execution failed: {$toolEx->getMessage()}",
-                                ];
-                            }
+                            $toolResultBlocks[] = [
+                                'type' => 'tool_result',
+                                'tool_use_id' => $toolUseId,
+                                'is_error' => ! $isSuccess,
+                                'content' => json_encode($toolData, JSON_UNESCAPED_SLASHES),
+                            ];
                         }
                     }
 
