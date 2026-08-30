@@ -4,13 +4,33 @@ namespace App\Tools\MCP\Repository;
 
 use App\Models\Incident;
 use App\Tools\Contracts\ToolInterface;
-use App\Tools\Permissions\ToolPermission;
+use App\Tools\Enums\AgentRole;
+use App\Tools\Enums\RiskLevel;
+use App\Tools\Enums\ToolPermission;
+use App\Tools\ToolDefinition;
 
 class InspectStructureTool implements ToolInterface
 {
+    public function definition(): ToolDefinition
+    {
+        return new ToolDefinition(
+            name: $this->name(),
+            description: $this->description(),
+            inputSchema: $this->parametersSchema(),
+            requiredPermission: $this->requiredPermission(),
+            allowedAgents: [
+                AgentRole::TRIAGE,
+                AgentRole::REPRODUCTION,
+                AgentRole::PATCH,
+                AgentRole::VALIDATION,
+            ],
+            riskLevel: RiskLevel::LOW,
+        );
+    }
+
     public function name(): string
     {
-        return 'repository_inspect_structure';
+        return 'repository.inspect_structure';
     }
 
     public function description(): string

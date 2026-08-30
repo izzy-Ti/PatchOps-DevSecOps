@@ -4,10 +4,10 @@ namespace App\Tools;
 
 use App\Models\Incident;
 use App\Tools\Contracts\ToolInterface;
+use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\InvalidToolArgumentException;
 use App\Tools\Exceptions\ToolNotFoundException;
 use App\Tools\Exceptions\UnauthorizedToolException;
-use App\Tools\Permissions\AgentRole;
 
 class ToolRegistry
 {
@@ -91,7 +91,7 @@ class ToolRegistry
 
         foreach ($this->tools as $tool) {
             if ($this->authorize($tool->name(), $role)) {
-                $definitions[] = ToolDefinition::fromTool($tool);
+                $definitions[] = $tool->definition();
             }
         }
 
@@ -106,7 +106,7 @@ class ToolRegistry
     public function getToolSchemasForRole(AgentRole $role): array
     {
         return array_map(
-            fn (ToolDefinition $def) => $def->toAnthropicSchema(),
+            fn (ToolDefinition $def) => $def->toLlmToolSchema(),
             $this->getToolsForRole($role)
         );
     }
@@ -121,11 +121,9 @@ class ToolRegistry
         }
 
         $tool = $this->get($toolName);
-        $required = $tool->requiredPermission();
+        $definition = $tool->definition();
 
-        $rolePermissions = config("tools.role_permissions.{$role->value}", []);
-
-        return in_array($required->value, $rolePermissions, true);
+        return $definition->isAllowedFor($role);
     }
 
     /**

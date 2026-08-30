@@ -4,13 +4,33 @@ namespace App\Tools\MCP\GitHub;
 
 use App\Models\Incident;
 use App\Tools\Contracts\ToolInterface;
-use App\Tools\Permissions\ToolPermission;
+use App\Tools\Enums\AgentRole;
+use App\Tools\Enums\RiskLevel;
+use App\Tools\Enums\ToolPermission;
+use App\Tools\ToolDefinition;
 
 class GetRepositoryTool implements ToolInterface
 {
+    public function definition(): ToolDefinition
+    {
+        return new ToolDefinition(
+            name: $this->name(),
+            description: $this->description(),
+            inputSchema: $this->parametersSchema(),
+            requiredPermission: $this->requiredPermission(),
+            allowedAgents: [
+                AgentRole::TRIAGE,
+                AgentRole::REPRODUCTION,
+                AgentRole::PATCH,
+                AgentRole::VALIDATION,
+            ],
+            riskLevel: RiskLevel::LOW,
+        );
+    }
+
     public function name(): string
     {
-        return 'github_get_repository';
+        return 'github.get_repository';
     }
 
     public function description(): string

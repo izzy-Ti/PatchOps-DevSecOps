@@ -2,8 +2,8 @@
 
 namespace App\Tools\Exceptions;
 
-use App\Tools\Permissions\AgentRole;
-use App\Tools\Permissions\ToolPermission;
+use App\Tools\Enums\AgentRole;
+use App\Tools\Enums\ToolPermission;
 use RuntimeException;
 
 class UnauthorizedToolException extends RuntimeException

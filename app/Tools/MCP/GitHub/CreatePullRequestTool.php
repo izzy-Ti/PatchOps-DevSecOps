@@ -4,18 +4,35 @@ namespace App\Tools\MCP\GitHub;
 
 use App\Models\Incident;
 use App\Tools\Contracts\ToolInterface;
-use App\Tools\Permissions\ToolPermission;
+use App\Tools\Enums\AgentRole;
+use App\Tools\Enums\RiskLevel;
+use App\Tools\Enums\ToolPermission;
+use App\Tools\ToolDefinition;
 
 class CreatePullRequestTool implements ToolInterface
 {
+    public function definition(): ToolDefinition
+    {
+        return new ToolDefinition(
+            name: $this->name(),
+            description: $this->description(),
+            inputSchema: $this->parametersSchema(),
+            requiredPermission: $this->requiredPermission(),
+            allowedAgents: [
+                AgentRole::PATCH,
+            ],
+            riskLevel: RiskLevel::HIGH,
+        );
+    }
+
     public function name(): string
     {
-        return 'github_create_pull_request';
+        return 'github.create_pull_request';
     }
 
     public function description(): string
     {
-        return 'Create an official Pull Request on GitHub containing security patch modifications (Requires human approval).';
+        return 'Open a new pull request on GitHub containing the generated remediation patch.';
     }
 
     public function parametersSchema(): array
@@ -23,25 +40,29 @@ class CreatePullRequestTool implements ToolInterface
         return [
             'type' => 'object',
             'properties' => [
-                'title' => [
+                'repository' => [
                     'type' => 'string',
-                    'description' => 'Pull request title.',
-                ],
-                'body' => [
-                    'type' => 'string',
-                    'description' => 'Detailed PR description with patch diagnostics and CVE reference.',
+                    'description' => 'Target repository name',
                 ],
                 'branch' => [
                     'type' => 'string',
-                    'description' => 'Head branch name for the fix.',
+                    'description' => 'Head branch containing the commit',
+                ],
+                'title' => [
+                    'type' => 'string',
+                    'description' => 'Title of the pull request',
+                ],
+                'body' => [
+                    'type' => 'string',
+                    'description' => 'Markdown description of the fix and CVE details',
                 ],
                 'base' => [
                     'type' => 'string',
-                    'description' => 'Base branch to merge into (e.g. main).',
+                    'description' => 'Base branch to merge into',
                     'default' => 'main',
                 ],
             ],
-            'required' => ['title', 'body', 'branch'],
+            'required' => ['repository', 'branch', 'title', 'body'],
         ];
     }
 
@@ -54,7 +75,7 @@ class CreatePullRequestTool implements ToolInterface
     {
         return [
             'pull_request_number' => 42,
-            'url' => "https://github.com/{$context->repository}/pull/42",
+            'url' => "https://github.com/{$arguments['repository']}/pull/42",
             'status' => 'open',
             'title' => $arguments['title'],
         ];

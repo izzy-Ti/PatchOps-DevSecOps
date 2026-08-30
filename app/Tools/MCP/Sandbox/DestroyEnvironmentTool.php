@@ -5,7 +5,10 @@ namespace App\Tools\MCP\Sandbox;
 use App\Models\Incident;
 use App\Services\Sandbox\SandboxManagerInterface;
 use App\Tools\Contracts\ToolInterface;
-use App\Tools\Permissions\ToolPermission;
+use App\Tools\Enums\AgentRole;
+use App\Tools\Enums\RiskLevel;
+use App\Tools\Enums\ToolPermission;
+use App\Tools\ToolDefinition;
 
 class DestroyEnvironmentTool implements ToolInterface
 {
@@ -15,9 +18,24 @@ class DestroyEnvironmentTool implements ToolInterface
         $this->sandbox ??= app(SandboxManagerInterface::class);
     }
 
+    public function definition(): ToolDefinition
+    {
+        return new ToolDefinition(
+            name: $this->name(),
+            description: $this->description(),
+            inputSchema: $this->parametersSchema(),
+            requiredPermission: $this->requiredPermission(),
+            allowedAgents: [
+                AgentRole::REPRODUCTION,
+                AgentRole::VALIDATION,
+            ],
+            riskLevel: RiskLevel::MEDIUM,
+        );
+    }
+
     public function name(): string
     {
-        return 'sandbox_destroy_environment';
+        return 'sandbox.destroy_environment';
     }
 
     public function description(): string

@@ -5,7 +5,10 @@ namespace App\Tools\MCP\Sandbox;
 use App\Models\Incident;
 use App\Services\Sandbox\SandboxManagerInterface;
 use App\Tools\Contracts\ToolInterface;
-use App\Tools\Permissions\ToolPermission;
+use App\Tools\Enums\AgentRole;
+use App\Tools\Enums\RiskLevel;
+use App\Tools\Enums\ToolPermission;
+use App\Tools\ToolDefinition;
 
 class ExecuteCommandTool implements ToolInterface
 {
@@ -15,14 +18,29 @@ class ExecuteCommandTool implements ToolInterface
         $this->sandbox ??= app(SandboxManagerInterface::class);
     }
 
+    public function definition(): ToolDefinition
+    {
+        return new ToolDefinition(
+            name: $this->name(),
+            description: $this->description(),
+            inputSchema: $this->parametersSchema(),
+            requiredPermission: $this->requiredPermission(),
+            allowedAgents: [
+                AgentRole::REPRODUCTION,
+                AgentRole::VALIDATION,
+            ],
+            riskLevel: RiskLevel::CRITICAL,
+        );
+    }
+
     public function name(): string
     {
-        return 'sandbox_execute';
+        return 'sandbox.execute';
     }
 
     public function description(): string
     {
-        return 'Execute a shell command inside an isolated ephemeral Docker container with execution limits.';
+        return 'Execute a shell command inside an ephemeral container and return stdout, stderr, and exit code.';
     }
 
     public function parametersSchema(): array
@@ -32,16 +50,16 @@ class ExecuteCommandTool implements ToolInterface
             'properties' => [
                 'workspace_id' => [
                     'type' => 'string',
-                    'description' => 'The target sandbox workspace identifier.',
+                    'description' => 'Unique identifier of the provisioned sandbox',
                 ],
                 'command' => [
                     'type' => 'string',
-                    'description' => 'Shell command to execute inside the sandbox.',
+                    'description' => 'Shell command string to run inside the container',
                 ],
                 'timeout' => [
                     'type' => 'integer',
-                    'description' => 'Execution ceiling in seconds.',
-                    'default' => 60,
+                    'description' => 'Maximum execution time in seconds',
+                    'default' => 120,
                 ],
             ],
             'required' => ['workspace_id', 'command'],
@@ -57,7 +75,7 @@ class ExecuteCommandTool implements ToolInterface
     {
         $workspaceId = $arguments['workspace_id'];
         $command = $arguments['command'];
-        $timeout = $arguments['timeout'] ?? 60;
+        $timeout = $arguments['timeout'] ?? 120;
 
         $result = $this->sandbox->runCommand($workspaceId, $command, $timeout);
 

@@ -3,12 +3,18 @@
 namespace App\Tools\Contracts;
 
 use App\Models\Incident;
-use App\Tools\Permissions\ToolPermission;
+use App\Tools\Enums\ToolPermission;
+use App\Tools\ToolDefinition;
 
 interface ToolInterface
 {
     /**
-     * Unique machine-readable tool identifier (e.g. 'github_get_file', 'sandbox_execute').
+     * Get the authoritative ToolDefinition metadata for this tool.
+     */
+    public function definition(): ToolDefinition;
+
+    /**
+     * Unique machine-readable tool identifier (e.g. 'github.get_file', 'sandbox.execute').
      */
     public function name(): string;
 
