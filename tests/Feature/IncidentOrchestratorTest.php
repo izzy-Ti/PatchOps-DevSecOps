@@ -4,7 +4,7 @@ use App\Enums\IncidentStatus;
 use App\Jobs\CreatePullRequestJob;
 use App\Jobs\GeneratePatchJob;
 use App\Jobs\HandleIncidentFailureJob;
-use App\Jobs\ReproduceVulnerabilityJob;
+use App\Jobs\ReproduceIncidentJob;
 use App\Jobs\TriageIncidentJob;
 use App\Jobs\ValidatePatchJob;
 use App\Models\Incident;
@@ -28,7 +28,7 @@ test('IncidentOrchestrator routes incident statuses to correct queue jobs', func
     // PRIORITIZED -> ReproduceVulnerabilityJob
     $prioritized = Incident::factory()->create(['status' => IncidentStatus::PRIORITIZED]);
     $orchestrator->handle($prioritized);
-    Queue::assertPushed(ReproduceVulnerabilityJob::class, fn ($job) => $job->incident->id === $prioritized->id);
+    Queue::assertPushed(ReproduceIncidentJob::class, fn ($job) => $job->incident->id === $prioritized->id);
 
     // REPRODUCED -> GeneratePatchJob
     $reproduced = Incident::factory()->create(['status' => IncidentStatus::REPRODUCED]);
@@ -89,7 +89,7 @@ test('state transition automatically triggers orchestrator listener and dispatch
 
     // Transition to PRIORITIZED (ReproduceVulnerabilityJob expected)
     $incident->transitionTo(IncidentStatus::PRIORITIZED);
-    Queue::assertPushed(ReproduceVulnerabilityJob::class, fn ($job) => $job->incident->id === $incident->id);
+    Queue::assertPushed(ReproduceIncidentJob::class, fn ($job) => $job->incident->id === $incident->id);
 });
 
 test('newly ingested vulnerability immediately triggers triage workflow job', function () {

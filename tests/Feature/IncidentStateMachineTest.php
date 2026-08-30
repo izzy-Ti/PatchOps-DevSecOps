@@ -9,9 +9,13 @@ use App\Models\IncidentTransition;
 use App\Services\Incident\IncidentStateMachine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Queue::fake();
+});
 
 test('RECEIVED to TRIAGING transitions successfully, updates status, writes history log, and fires event', function () {
     Event::fake([IncidentStatusChanged::class]);

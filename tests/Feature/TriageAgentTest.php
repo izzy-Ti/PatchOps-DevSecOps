@@ -5,7 +5,7 @@ use App\DTOs\TriageResultDTO;
 use App\Enums\IncidentPriority;
 use App\Enums\IncidentStatus;
 use App\Enums\VulnerabilitySeverity;
-use App\Jobs\ReproduceVulnerabilityJob;
+use App\Jobs\ReproduceIncidentJob;
 use App\Jobs\TriageIncidentJob;
 use App\Models\Incident;
 use App\Models\Vulnerability;
@@ -115,7 +115,7 @@ test('TriageAgent gracefully handles Claude API error', function () {
 });
 
 test('TriageIncidentJob executes full triage flow from RECEIVED to PRIORITIZED and dispatches reproduction job', function () {
-    Queue::fake([ReproduceVulnerabilityJob::class]);
+    Queue::fake([ReproduceIncidentJob::class]);
     config()->set('services.anthropic.key', 'sk-ant-test-key');
 
     Http::fake([
@@ -154,13 +154,13 @@ test('TriageIncidentJob executes full triage flow from RECEIVED to PRIORITIZED a
         ->and($incident->metadata['production_exposed'])->toBeTrue()
         ->and($incident->metadata['affected_component'])->toBe('vendor/core-auth');
 
-    Queue::assertPushed(ReproduceVulnerabilityJob::class, function ($job) use ($incident) {
+    Queue::assertPushed(ReproduceIncidentJob::class, function ($job) use ($incident) {
         return $job->incident->id === $incident->id;
     });
 });
 
 test('TriageIncidentJob escalates incident when triage fails', function () {
-    Queue::fake([ReproduceVulnerabilityJob::class]);
+    Queue::fake([ReproduceIncidentJob::class]);
     config()->set('services.anthropic.key', 'sk-ant-test-key');
 
     Http::fake([
@@ -177,5 +177,5 @@ test('TriageIncidentJob escalates incident when triage fails', function () {
     $incident->refresh();
 
     expect($incident->status)->toBe(IncidentStatus::ESCALATED);
-    Queue::assertNotPushed(ReproduceVulnerabilityJob::class);
+    Queue::assertNotPushed(ReproduceIncidentJob::class);
 });

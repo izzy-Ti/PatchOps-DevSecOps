@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Events\IncidentStatusChanged;
 use App\Listeners\OrchestrateIncidentWorkflow;
+use App\Services\Sandbox\DockerSandboxService;
+use App\Services\Sandbox\SandboxManagerInterface;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -14,7 +16,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(SandboxManagerInterface::class, DockerSandboxService::class);
     }
 
     /**

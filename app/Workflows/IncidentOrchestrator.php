@@ -2,6 +2,7 @@
 
 namespace App\Workflows;
 
+use App\DTOs\ReproductionResultDTO;
 use App\DTOs\TriageResultDTO;
 use App\Enums\IncidentPriority;
 use App\Enums\IncidentStatus;
@@ -9,7 +10,7 @@ use App\Enums\VulnerabilitySeverity;
 use App\Jobs\CreatePullRequestJob;
 use App\Jobs\GeneratePatchJob;
 use App\Jobs\HandleIncidentFailureJob;
-use App\Jobs\ReproduceVulnerabilityJob;
+use App\Jobs\ReproduceIncidentJob;
 use App\Jobs\TriageIncidentJob;
 use App\Jobs\ValidatePatchJob;
 use App\Models\Incident;
@@ -37,7 +38,7 @@ class IncidentOrchestrator
 
         match ($status) {
             IncidentStatus::RECEIVED => TriageIncidentJob::dispatch($incident)->onQueue('incidents'),
-            IncidentStatus::PRIORITIZED => ReproduceVulnerabilityJob::dispatch($incident)->onQueue('incidents'),
+            IncidentStatus::PRIORITIZED => ReproduceIncidentJob::dispatch($incident)->onQueue('incidents'),
             IncidentStatus::REPRODUCED => GeneratePatchJob::dispatch($incident)->onQueue('incidents'),
             IncidentStatus::PATCHING,
             IncidentStatus::VALIDATING => ValidatePatchJob::dispatch($incident)->onQueue('incidents'),
@@ -94,7 +95,7 @@ class IncidentOrchestrator
                 ],
             );
 
-            ReproduceVulnerabilityJob::dispatch($incident)->onQueue('incidents');
+            ReproduceIncidentJob::dispatch($incident)->onQueue('incidents');
         } else {
             $failureReason = 'Triage failed: '.($result->errorMessage ?? 'Missing required fields or invalid triage structure.');
 
@@ -106,6 +107,73 @@ class IncidentOrchestrator
                 actorId: 'triage-agent',
                 metadata: [
                     'error' => $result->errorMessage,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Handle the structured result from ReproductionAgent.
+     */
+    public function handleReproductionResult(Incident $incident, ReproductionResultDTO $result): void
+    {
+        if ($result->reproduced) {
+            $incident->metadata = array_merge($incident->metadata ?? [], [
+                'poc_script' => $result->pocScript,
+                'reproduction_stdout' => $result->stdout,
+                'reproduction_stderr' => $result->stderr,
+                'reproduction_summary' => $result->summary,
+                'reproduction_time_seconds' => $result->executionTimeSeconds,
+                'reproduced_at' => now()->toIso8601String(),
+            ]);
+            $incident->save();
+
+            $this->stateMachine->transition(
+                incident: $incident,
+                targetStatus: IncidentStatus::REPRODUCED,
+                reason: $result->summary ?? 'Vulnerability successfully reproduced in isolated sandbox.',
+                actorType: 'agent',
+                actorId: 'reproduction-agent',
+                metadata: [
+                    'artifacts' => $result->artifacts,
+                    'time_seconds' => $result->executionTimeSeconds,
+                ],
+            );
+
+            GeneratePatchJob::dispatch($incident)->onQueue('incidents');
+        } elseif ($result->sandboxSuccess) {
+            $incident->metadata = array_merge($incident->metadata ?? [], [
+                'reproduction_failure_reason' => $result->failureReason,
+                'reproduction_stdout' => $result->stdout,
+                'reproduction_stderr' => $result->stderr,
+            ]);
+            $incident->save();
+
+            $this->stateMachine->transition(
+                incident: $incident,
+                targetStatus: IncidentStatus::FAILED,
+                reason: 'Reproduction failed: '.($result->failureReason ?? 'Vulnerability behavior not observed in sandbox.'),
+                actorType: 'agent',
+                actorId: 'reproduction-agent',
+                metadata: [
+                    'failure_reason' => $result->failureReason,
+                    'exit_code' => $result->exitCode,
+                ],
+            );
+        } else {
+            $incident->metadata = array_merge($incident->metadata ?? [], [
+                'reproduction_error' => $result->failureReason,
+            ]);
+            $incident->save();
+
+            $this->stateMachine->transition(
+                incident: $incident,
+                targetStatus: IncidentStatus::ESCALATED,
+                reason: 'Reproduction sandbox error: '.($result->failureReason ?? 'Sandbox environment failed to initialize or execute.'),
+                actorType: 'agent',
+                actorId: 'reproduction-agent',
+                metadata: [
+                    'error' => $result->failureReason,
                 ],
             );
         }
