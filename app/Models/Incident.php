@@ -252,4 +252,22 @@ class Incident extends Model
     {
         return $this->hasMany(AgentRun::class)->orderBy('id', 'asc');
     }
+
+    /**
+     * Retrieve the model for a bound value by ID, incident_number, or correlation_id.
+     *
+     * @param  mixed  $value
+     * @param  string|null  $field
+     */
+    public function resolveRouteBinding($value, $field = null): ?Model
+    {
+        if ($field) {
+            return $this->where($field, $value)->first();
+        }
+
+        return $this->where('id', $value)
+            ->orWhere('incident_number', $value)
+            ->orWhere('correlation_id', $value)
+            ->first();
+    }
 }

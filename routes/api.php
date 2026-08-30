@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\IncidentController;
+use App\Http\Controllers\Api\IncidentTelemetryController;
 use App\Http\Controllers\Api\Webhooks\CveWebhookController;
 use App\Http\Controllers\Api\Webhooks\GithubWebhookController;
 use App\Http\Controllers\Api\Webhooks\SnykWebhookController;
@@ -30,10 +31,12 @@ Route::middleware([EnsureCorrelationId::class])->group(function (): void {
         Route::post('/cve', [CveWebhookController::class, 'handle'])->name('webhooks.cve');
     });
 
-    // Incidents Read APIs (v1)
+    // Incidents Telemetry & Read APIs (v1)
     Route::prefix('v1/incidents')->name('v1.incidents.')->group(function (): void {
         Route::get('/', [IncidentController::class, 'index'])->name('index');
-        Route::get('/{incident}', [IncidentController::class, 'show'])->name('show');
+        Route::get('/{incident}', [IncidentTelemetryController::class, 'show'])->name('show');
+        Route::get('/{incident}/agent-runs', [IncidentTelemetryController::class, 'agentRuns'])->name('agent-runs');
+        Route::get('/{incident}/transitions', [IncidentTelemetryController::class, 'transitions'])->name('transitions');
     });
 
     // Incidents Management (Protected)
