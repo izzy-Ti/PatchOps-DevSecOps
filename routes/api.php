@@ -30,10 +30,16 @@ Route::middleware([EnsureCorrelationId::class])->group(function (): void {
         Route::post('/cve', [CveWebhookController::class, 'handle'])->name('webhooks.cve');
     });
 
+    // Incidents Read APIs (v1)
+    Route::prefix('v1/incidents')->name('v1.incidents.')->group(function (): void {
+        Route::get('/', [IncidentController::class, 'index'])->name('index');
+        Route::get('/{incident}', [IncidentController::class, 'show'])->name('show');
+    });
+
     // Incidents Management (Protected)
     Route::middleware('auth:sanctum')->prefix('incidents')->name('incidents.')->group(function (): void {
         Route::get('/', [IncidentController::class, 'index'])->name('index');
         Route::post('/', [IncidentController::class, 'store'])->name('store');
-        Route::get('/{id}', [IncidentController::class, 'show'])->name('show');
+        Route::get('/{incident}', [IncidentController::class, 'show'])->name('show');
     });
 });

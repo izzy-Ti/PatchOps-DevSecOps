@@ -7,12 +7,15 @@ use App\Http\Requests\Api\StoreIncidentRequest;
 use App\Http\Resources\IncidentResource;
 use App\Models\Incident;
 use App\Services\AuditLogger;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class IncidentController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    /**
+     * Display a paginated listing of incidents with optional filters.
+     */
+    public function index(Request $request): AnonymousResourceCollection
     {
         $query = Incident::query();
 
@@ -24,21 +27,23 @@ class IncidentController extends Controller
             $query->where('severity', $request->query('severity'));
         }
 
+        if ($request->filled('priority')) {
+            $query->where('priority', $request->query('priority'));
+        }
+
+        if ($request->filled('repository')) {
+            $query->where('repository', $request->query('repository'));
+        }
+
         $incidents = $query->latest('id')->paginate($request->integer('per_page', 15));
 
-        return response()->json([
-            'success' => true,
-            'data' => IncidentResource::collection($incidents),
-            'meta' => [
-                'current_page' => $incidents->currentPage(),
-                'last_page' => $incidents->lastPage(),
-                'per_page' => $incidents->perPage(),
-                'total' => $incidents->total(),
-            ],
-        ]);
+        return IncidentResource::collection($incidents);
     }
 
-    public function store(StoreIncidentRequest $request): JsonResponse
+    /**
+     * Store a newly created incident.
+     */
+    public function store(StoreIncidentRequest $request): IncidentResource
     {
         $user = $request->user();
 
@@ -58,26 +63,22 @@ class IncidentController extends Controller
                 auditable: $incident,
                 payload: [
                     'title' => $incident->title,
-                    'severity' => $incident->severity,
+                    'severity' => $incident->severity?->value ?? (string) $incident->severity,
                 ],
                 correlationId: $incident->correlation_id,
             );
         }
 
-        return response()->json([
-            'success' => true,
-            'data' => new IncidentResource($incident),
-            'correlation_id' => $incident->correlation_id,
-        ], 201);
+        return new IncidentResource($incident);
     }
 
-    public function show(int $id): JsonResponse
+    /**
+     * Display the specified incident by ID with loaded vulnerability details.
+     */
+    public function show(Incident $incident): IncidentResource
     {
-        $incident = Incident::findOrFail($id);
+        $incident->loadMissing('vulnerability');
 
-        return response()->json([
-            'success' => true,
-            'data' => new IncidentResource($incident),
-        ]);
+        return new IncidentResource($incident);
     }
 }

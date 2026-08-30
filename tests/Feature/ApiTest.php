@@ -154,8 +154,6 @@ test('authenticated user can create an incident and get correlation_id', functio
 
     $response->assertCreated()
         ->assertJson([
-            'success' => true,
-            'correlation_id' => 'INC-VULN-001',
             'data' => [
                 'title' => 'SQL Injection Vulnerability in User Search',
                 'severity' => 'high',
@@ -185,7 +183,6 @@ test('authenticated user can list and filter incidents', function () {
     $response = $this->getJson('/api/incidents');
     $response->assertOk()
         ->assertJsonStructure([
-            'success',
             'data',
             'meta' => ['current_page', 'last_page', 'total'],
         ]);
@@ -213,7 +210,6 @@ test('authenticated user can view single incident', function () {
 
     $response->assertOk()
         ->assertJson([
-            'success' => true,
             'data' => [
                 'id' => $incident->id,
                 'title' => 'Buffer Overflow in Auth Service',
