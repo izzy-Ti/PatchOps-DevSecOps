@@ -1,27 +1,28 @@
-FROM php:8.3-fpm-alpine
+FROM php:8.4-cli
 
-# Install system dependencies and PostgreSQL/Redis PHP extensions
-RUN apk add --no-cache \
-    postgresql-dev \
-    libzip-dev \
-    zip \
-    unzip \
-    git \
-    curl \
-    && docker-php-ext-install pdo pdo_pgsql zip
+WORKDIR /var/www/html
 
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+RUN apt-get update \
+    && apt-get install -y \
+        git \
+        curl \
+        unzip \
+        zip \
+        libpq-dev \
+        libzip-dev \
+    && docker-php-ext-install \
+        pdo \
+        pdo_pgsql \
+        zip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /var/www
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Copy application files
 COPY . .
 
-# Set proper permissions for Laravel storage and cache
-RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader
 
 EXPOSE 8000
 
-# Start built-in PHP development server
-CMD php artisan serve --host=0.0.0.0 --port=8000
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
