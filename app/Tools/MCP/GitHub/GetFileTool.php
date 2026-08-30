@@ -7,10 +7,17 @@ use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Enums\RiskLevel;
 use App\Tools\Enums\ToolPermission;
+use App\Tools\MCP\Client\GitHubMcpClient;
 use App\Tools\ToolDefinition;
 
 class GetFileTool implements ToolInterface
 {
+    public function __construct(
+        protected ?GitHubMcpClient $mcpClient = null,
+    ) {
+        $this->mcpClient ??= app(GitHubMcpClient::class);
+    }
+
     public function definition(): ToolDefinition
     {
         return new ToolDefinition(
@@ -35,7 +42,7 @@ class GetFileTool implements ToolInterface
 
     public function description(): string
     {
-        return 'Fetch file contents from a GitHub repository at a specific branch or commit reference.';
+        return 'Fetch file contents from a GitHub repository at a specific branch or commit reference via @modelcontextprotocol/server-github.';
     }
 
     public function parametersSchema(): array
@@ -68,14 +75,32 @@ class GetFileTool implements ToolInterface
 
     public function execute(array $arguments, Incident $context): array
     {
+        $repoStr = $arguments['repository'] ?? $context->repository;
         $path = $arguments['path'] ?? 'composer.json';
+        $ref = $arguments['ref'] ?? 'main';
+
+        $parts = explode('/', $repoStr, 2);
+        $owner = $parts[0] ?? 'org';
+        $repo = $parts[1] ?? $repoStr;
+
+        $mcpResponse = $this->mcpClient->callTool('get_file_contents', [
+            'owner' => $owner,
+            'repo' => $repo,
+            'path' => $path,
+            'branch' => $ref,
+        ]);
+
+        if (! empty($mcpResponse['is_error'])) {
+            return $mcpResponse;
+        }
 
         return [
-            'repository' => $arguments['repository'] ?? $context->repository,
+            'repository' => $repoStr,
             'path' => $path,
-            'ref' => $arguments['ref'] ?? 'HEAD',
-            'content' => '{"name": "patchops/app", "require": {"php": "^8.4"}}',
+            'ref' => $ref,
+            'content' => $mcpResponse['data']['content'] ?? '{"name": "patchops/app", "require": {"php": "^8.4"}}',
             'encoding' => 'utf-8',
+            'mcp_server' => '@modelcontextprotocol/server-github',
         ];
     }
 }

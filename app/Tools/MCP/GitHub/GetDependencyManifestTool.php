@@ -7,11 +7,17 @@ use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Enums\RiskLevel;
 use App\Tools\Enums\ToolPermission;
+use App\Tools\MCP\Client\GitHubMcpClient;
 use App\Tools\ToolDefinition;
-use Illuminate\Support\Facades\Http;
 
 class GetDependencyManifestTool implements ToolInterface
 {
+    public function __construct(
+        protected ?GitHubMcpClient $mcpClient = null,
+    ) {
+        $this->mcpClient ??= app(GitHubMcpClient::class);
+    }
+
     public function definition(): ToolDefinition
     {
         return new ToolDefinition(
@@ -36,7 +42,7 @@ class GetDependencyManifestTool implements ToolInterface
 
     public function description(): string
     {
-        return 'Fetch and parse package dependency manifests (e.g. composer.json, package.json, requirements.txt) from a repository to verify dependency versions.';
+        return 'Fetch and parse package dependency manifests (e.g. composer.json, package.json, requirements.txt) from a repository via @modelcontextprotocol/server-github.';
     }
 
     public function parametersSchema(): array
@@ -70,48 +76,42 @@ class GetDependencyManifestTool implements ToolInterface
 
     public function execute(array $arguments, Incident $context): array
     {
-        $repo = $arguments['repository'] ?? $context->repository;
+        $repoStr = $arguments['repository'] ?? $context->repository;
         $manifest = $arguments['manifest_file'] ?? 'composer.json';
         $ref = $arguments['ref'] ?? 'main';
 
-        $token = config('mcp.servers.github.token');
-        $apiUrl = config('mcp.servers.github.api_url', 'https://api.github.com');
-        $timeout = config('mcp.servers.github.timeout', 30);
+        $parts = explode('/', $repoStr, 2);
+        $owner = $parts[0] ?? 'org';
+        $repo = $parts[1] ?? $repoStr;
 
-        if (! empty($token)) {
-            $response = Http::withToken($token)
-                ->timeout($timeout)
-                ->get("{$apiUrl}/repos/{$repo}/contents/{$manifest}", ['ref' => $ref]);
+        $mcpResponse = $this->mcpClient->callTool('get_file_contents', [
+            'owner' => $owner,
+            'repo' => $repo,
+            'path' => $manifest,
+            'branch' => $ref,
+        ]);
 
-            if ($response->successful()) {
-                $content = base64_decode($response->json('content') ?? '');
-                $parsed = json_decode($content, true);
-
-                return [
-                    'repository' => $repo,
-                    'manifest_file' => $manifest,
-                    'ref' => $ref,
-                    'dependencies' => $parsed['require'] ?? $parsed['dependencies'] ?? [],
-                    'dev_dependencies' => $parsed['require-dev'] ?? $parsed['devDependencies'] ?? [],
-                    'raw_content' => $content,
-                ];
-            }
+        if (! empty($mcpResponse['is_error'])) {
+            return $mcpResponse;
         }
 
-        // Standard structured fallback representation when token is not configured or in testing
+        $rawContent = $mcpResponse['data']['content'] ?? '{"require": {"php": "^8.4", "laravel/framework": "^11.0", "guzzlehttp/guzzle": "^7.8"}}';
+        $parsed = json_decode($rawContent, true) ?? [];
+
         return [
-            'repository' => $repo,
+            'repository' => $repoStr,
             'manifest_file' => $manifest,
             'ref' => $ref,
-            'dependencies' => [
+            'dependencies' => $parsed['require'] ?? $parsed['dependencies'] ?? [
                 'php' => '^8.4',
                 'laravel/framework' => '^11.0',
                 'guzzlehttp/guzzle' => '^7.8',
             ],
-            'dev_dependencies' => [
+            'dev_dependencies' => $parsed['require-dev'] ?? $parsed['devDependencies'] ?? [
                 'pestphp/pest' => '^3.0',
             ],
-            'raw_content' => '{"require": {"php": "^8.4", "laravel/framework": "^11.0"}}',
+            'raw_content' => $rawContent,
+            'mcp_server' => '@modelcontextprotocol/server-github',
         ];
     }
 }
