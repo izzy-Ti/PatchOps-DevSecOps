@@ -3,7 +3,8 @@
 namespace App\Tools\MCP\Sandbox;
 
 use App\Models\Incident;
-use App\Services\Sandbox\SandboxManagerInterface;
+use App\Services\Sandbox\Contracts\SandboxManagerInterface;
+use App\Services\Sandbox\DockerSandboxManager;
 use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Enums\RiskLevel;
@@ -13,9 +14,9 @@ use App\Tools\ToolDefinition;
 class ExecuteCommandTool implements ToolInterface
 {
     public function __construct(
-        protected ?SandboxManagerInterface $sandbox = null,
+        protected ?SandboxManagerInterface $sandboxManager = null,
     ) {
-        $this->sandbox ??= app(SandboxManagerInterface::class);
+        $this->sandboxManager ??= app(DockerSandboxManager::class);
     }
 
     public function definition(): ToolDefinition
@@ -40,7 +41,7 @@ class ExecuteCommandTool implements ToolInterface
 
     public function description(): string
     {
-        return 'Execute a shell command inside an ephemeral container and return stdout, stderr, and exit code.';
+        return 'Execute a test script, build command, or reproduction proof-of-concept inside an isolated sandbox container with hard timeouts.';
     }
 
     public function parametersSchema(): array
@@ -50,16 +51,16 @@ class ExecuteCommandTool implements ToolInterface
             'properties' => [
                 'workspace_id' => [
                     'type' => 'string',
-                    'description' => 'Unique identifier of the provisioned sandbox',
+                    'description' => 'Target provisioned sandbox workspace ID.',
                 ],
                 'command' => [
                     'type' => 'string',
-                    'description' => 'Shell command string to run inside the container',
+                    'description' => 'Command line string to execute in the container.',
                 ],
-                'timeout' => [
+                'timeout_seconds' => [
                     'type' => 'integer',
-                    'description' => 'Maximum execution time in seconds',
-                    'default' => 120,
+                    'description' => 'Execution timeout in seconds (default 180s).',
+                    'default' => 180,
                 ],
             ],
             'required' => ['workspace_id', 'command'],
@@ -75,16 +76,10 @@ class ExecuteCommandTool implements ToolInterface
     {
         $workspaceId = $arguments['workspace_id'];
         $command = $arguments['command'];
-        $timeout = $arguments['timeout'] ?? 120;
+        $timeout = isset($arguments['timeout_seconds']) ? (int) $arguments['timeout_seconds'] : (isset($arguments['timeout']) ? (int) $arguments['timeout'] : null);
 
-        $result = $this->sandbox->runCommand($workspaceId, $command, $timeout);
+        $resultDto = $this->sandboxManager->execute($workspaceId, $command, $timeout);
 
-        return [
-            'success' => $result->success,
-            'exit_code' => $result->exitCode,
-            'stdout' => $result->stdout,
-            'stderr' => $result->stderr,
-            'execution_time_seconds' => $result->executionTimeSeconds,
-        ];
+        return $resultDto->toArray();
     }
 }

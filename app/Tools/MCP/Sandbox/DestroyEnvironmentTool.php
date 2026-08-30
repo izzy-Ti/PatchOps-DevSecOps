@@ -3,7 +3,9 @@
 namespace App\Tools\MCP\Sandbox;
 
 use App\Models\Incident;
-use App\Services\Sandbox\SandboxManagerInterface;
+use App\Services\AuditLogger;
+use App\Services\Sandbox\Contracts\SandboxManagerInterface;
+use App\Services\Sandbox\DockerSandboxManager;
 use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Enums\RiskLevel;
@@ -13,9 +15,9 @@ use App\Tools\ToolDefinition;
 class DestroyEnvironmentTool implements ToolInterface
 {
     public function __construct(
-        protected ?SandboxManagerInterface $sandbox = null,
+        protected ?SandboxManagerInterface $sandboxManager = null,
     ) {
-        $this->sandbox ??= app(SandboxManagerInterface::class);
+        $this->sandboxManager ??= app(DockerSandboxManager::class);
     }
 
     public function definition(): ToolDefinition
@@ -29,7 +31,7 @@ class DestroyEnvironmentTool implements ToolInterface
                 AgentRole::REPRODUCTION,
                 AgentRole::VALIDATION,
             ],
-            riskLevel: RiskLevel::MEDIUM,
+            riskLevel: RiskLevel::LOW,
         );
     }
 
@@ -40,7 +42,7 @@ class DestroyEnvironmentTool implements ToolInterface
 
     public function description(): string
     {
-        return 'Tear down and destroy an isolated ephemeral Docker container workspace.';
+        return 'Force-kill container processes, purge ephemeral filesystem volumes, and destroy the sandbox environment.';
     }
 
     public function parametersSchema(): array
@@ -50,7 +52,7 @@ class DestroyEnvironmentTool implements ToolInterface
             'properties' => [
                 'workspace_id' => [
                     'type' => 'string',
-                    'description' => 'The ephemeral sandbox workspace identifier to destroy.',
+                    'description' => 'Target sandbox workspace ID to destroy.',
                 ],
             ],
             'required' => ['workspace_id'],
@@ -65,11 +67,22 @@ class DestroyEnvironmentTool implements ToolInterface
     public function execute(array $arguments, Incident $context): array
     {
         $workspaceId = $arguments['workspace_id'];
-        $this->sandbox->cleanup($workspaceId);
+
+        $this->sandboxManager->destroy($workspaceId);
+
+        AuditLogger::logSystemAction(
+            event: 'sandbox.environment_destroyed',
+            auditable: $context,
+            payload: [
+                'workspace_id' => $workspaceId,
+            ],
+            correlationId: $context->correlation_id,
+        );
 
         return [
             'workspace_id' => $workspaceId,
             'status' => 'destroyed',
+            'cleaned' => true,
         ];
     }
 }

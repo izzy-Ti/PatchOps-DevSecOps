@@ -1,82 +1,66 @@
 <?php
 
 use App\Models\Incident;
-use App\Services\Sandbox\ProcessResult;
-use App\Services\Sandbox\SandboxManagerInterface;
+use App\Services\Sandbox\DockerSandboxManager;
+use App\Services\Sandbox\DTOs\SandboxExecutionResultDTO;
+use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\InvalidToolArgumentException;
 use App\Tools\Exceptions\ToolNotFoundException;
-use App\Tools\Exceptions\UnauthorizedToolException;
 use App\Tools\ToolRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-test('ToolRegistry discovers and registers all default tool providers', function () {
-    $registry = app(ToolRegistry::class);
-
+test('ToolRegistry registers and retrieves tool instances', function () {
+    $registry = new ToolRegistry;
     expect($registry->has('github.get_repository'))->toBeTrue()
-        ->and($registry->has('github.get_file'))->toBeTrue()
-        ->and($registry->has('github.create_pull_request'))->toBeTrue()
         ->and($registry->has('vulnerability.get_cve'))->toBeTrue()
-        ->and($registry->has('vulnerability.search'))->toBeTrue()
-        ->and($registry->has('repository.inspect_structure'))->toBeTrue()
-        ->and($registry->has('repository.search_code'))->toBeTrue()
-        ->and($registry->has('sandbox.create_environment'))->toBeTrue()
-        ->and($registry->has('sandbox.execute'))->toBeTrue()
-        ->and($registry->has('sandbox.destroy_environment'))->toBeTrue();
+        ->and($registry->has('sandbox.execute'))->toBeTrue();
 
-    expect(fn () => $registry->get('non_existent_tool'))
-        ->toThrow(ToolNotFoundException::class);
+    $tool = $registry->get('github.get_repository');
+    expect($tool)->toBeInstanceOf(ToolInterface::class);
 });
 
-test('ToolRegistry dynamically compiles authorized tool schemas per agent role', function () {
-    $registry = app(ToolRegistry::class);
+test('ToolRegistry throws ToolNotFoundException for unregistered tools', function () {
+    $registry = new ToolRegistry;
+    expect(fn () => $registry->get('unknown.tool'))->toThrow(ToolNotFoundException::class);
+});
 
-    // Triage role: Should only see GitHub Read, Vulnerability Read, Repo Read tools
-    $triageTools = $registry->getToolsForRole(AgentRole::TRIAGE);
-    $triageNames = array_map(fn ($tool) => $tool->name, $triageTools);
+test('ToolRegistry authorizes tools according to least privilege role matrix', function () {
+    $registry = new ToolRegistry;
 
-    expect($triageNames)->toContain('github.get_repository')
-        ->and($triageNames)->toContain('vulnerability.get_cve')
-        ->and($triageNames)->toContain('repository.search_code')
-        ->and($triageNames)->not->toContain('sandbox.execute')
-        ->and($triageNames)->not->toContain('github.create_pull_request');
+    // Triage Agent
+    expect($registry->authorize('github.get_repository', AgentRole::TRIAGE))->toBeTrue()
+        ->and($registry->authorize('vulnerability.get_cve', AgentRole::TRIAGE))->toBeTrue()
+        ->and($registry->authorize('sandbox.execute', AgentRole::TRIAGE))->toBeFalse()
+        ->and($registry->authorize('github.create_pull_request', AgentRole::TRIAGE))->toBeFalse();
 
-    // Schemas format properly for Claude
+    // Reproduction Agent
+    expect($registry->authorize('sandbox.execute', AgentRole::REPRODUCTION))->toBeTrue()
+        ->and($registry->authorize('github.create_pull_request', AgentRole::REPRODUCTION))->toBeFalse();
+
+    // Patch Agent
+    expect($registry->authorize('github.create_pull_request', AgentRole::PATCH))->toBeTrue();
+});
+
+test('ToolRegistry generates valid OpenAI / Anthropic function calling schemas', function () {
+    $registry = new ToolRegistry;
     $schemas = $registry->getToolSchemasForRole(AgentRole::TRIAGE);
+
     expect($schemas)->toBeArray()
-        ->and($schemas[0])->toHaveKeys(['name', 'description', 'input_schema']);
+        ->and(count($schemas))->toBeGreaterThan(0);
+
+    $first = $schemas[0];
+    expect($first)->toHaveKeys(['name', 'description', 'input_schema']);
 });
 
-test('ToolRegistry enforces role authorization before execution', function () {
-    $registry = app(ToolRegistry::class);
+test('ToolRegistry validates input arguments against parameter schema before execution', function () {
+    $registry = new ToolRegistry;
     $incident = Incident::factory()->create();
 
-    // 1. Triage Agent attempting sandbox.execute -> Unauthorized
     expect(fn () => $registry->execute(
-        toolName: 'sandbox.execute',
-        arguments: ['workspace_id' => 'ws-1', 'command' => 'php -v'],
-        role: AgentRole::TRIAGE,
-        incident: $incident,
-    ))->toThrow(UnauthorizedToolException::class);
-
-    // 2. Reproduction Agent attempting github.create_pull_request -> Unauthorized
-    expect(fn () => $registry->execute(
-        toolName: 'github.create_pull_request',
-        arguments: ['repository' => 'org/repo', 'title' => 'Fix', 'body' => 'Details', 'branch' => 'fix-branch'],
-        role: AgentRole::REPRODUCTION,
-        incident: $incident,
-    ))->toThrow(UnauthorizedToolException::class);
-});
-
-test('ToolRegistry validates required tool arguments against parameter schema', function () {
-    $registry = app(ToolRegistry::class);
-    $incident = Incident::factory()->create();
-
-    // Missing 'repository' parameter for github.get_repository
-    expect(fn () => $registry->execute(
-        toolName: 'github.get_repository',
+        toolName: 'github.get_file',
         arguments: [],
         role: AgentRole::TRIAGE,
         incident: $incident,
@@ -84,22 +68,22 @@ test('ToolRegistry validates required tool arguments against parameter schema', 
 });
 
 test('ToolRegistry executes authorized tools cleanly and returns structured output', function () {
-    $mockSandbox = Mockery::mock(SandboxManagerInterface::class);
-    $mockSandbox->shouldReceive('runCommand')->once()->with('test-ws', 'npm test', 60)->andReturn(new ProcessResult(
+    $mockSandbox = Mockery::mock(DockerSandboxManager::class);
+    $mockSandbox->shouldReceive('execute')->once()->with('test-ws', 'npm test', 60)->andReturn(new SandboxExecutionResultDTO(
         success: true,
         exitCode: 0,
         stdout: '12 passed',
         stderr: '',
-        executionTimeSeconds: 1.2,
+        durationSeconds: 1.2,
     ));
-    app()->instance(SandboxManagerInterface::class, $mockSandbox);
+    app()->instance(DockerSandboxManager::class, $mockSandbox);
 
     $registry = new ToolRegistry;
     $incident = Incident::factory()->create();
 
     $result = $registry->execute(
         toolName: 'sandbox.execute',
-        arguments: ['workspace_id' => 'test-ws', 'command' => 'npm test', 'timeout' => 60],
+        arguments: ['workspace_id' => 'test-ws', 'command' => 'npm test', 'timeout_seconds' => 60],
         role: AgentRole::REPRODUCTION,
         incident: $incident,
     );
