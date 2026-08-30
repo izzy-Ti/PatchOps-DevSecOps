@@ -5,6 +5,7 @@ namespace App\Workflows;
 use App\DTOs\PatchResultDTO;
 use App\DTOs\ReproductionResultDTO;
 use App\DTOs\TriageResultDTO;
+use App\DTOs\ValidationResultDTO;
 use App\Enums\IncidentPriority;
 use App\Enums\IncidentStatus;
 use App\Enums\VulnerabilitySeverity;
@@ -225,6 +226,53 @@ class IncidentOrchestrator
                     'error' => $result->failureReason,
                 ],
             );
+        }
+    }
+
+    /**
+     * Handle the structured result from ValidationAgent.
+     */
+    public function handleValidationResult(Incident $incident, ValidationResultDTO $result): void
+    {
+        if ($result->passed) {
+            $incident->metadata = array_merge($incident->metadata ?? [], [
+                'validation_test_output' => $result->testOutput,
+                'validation_build_output' => $result->buildOutput,
+                'validation_summary' => $result->summary,
+                'validated_at' => now()->toIso8601String(),
+            ]);
+            $incident->save();
+
+            $this->stateMachine->transition(
+                incident: $incident,
+                targetStatus: IncidentStatus::AWAITING_APPROVAL,
+                reason: $result->summary ?? 'Patch validation passed all regression tests and security scans.',
+                actorType: 'agent',
+                actorId: 'validation-agent',
+                metadata: [
+                    'summary' => $result->summary,
+                ],
+            );
+        } else {
+            $incident->metadata = array_merge($incident->metadata ?? [], [
+                'last_validation_feedback' => $result->feedback,
+                'validation_test_output' => $result->testOutput,
+                'validation_build_output' => $result->buildOutput,
+            ]);
+            $incident->save();
+
+            $this->stateMachine->transition(
+                incident: $incident,
+                targetStatus: IncidentStatus::PATCHING,
+                reason: 'Validation failed: '.($result->feedback ?? 'Automated test or build failure.'),
+                actorType: 'agent',
+                actorId: 'validation-agent',
+                metadata: [
+                    'feedback' => $result->feedback,
+                ],
+            );
+
+            GeneratePatchJob::dispatch($incident)->onQueue('incidents');
         }
     }
 }
