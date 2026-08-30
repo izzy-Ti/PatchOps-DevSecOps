@@ -2,9 +2,12 @@
 
 namespace App\Services\Sandbox;
 
+use App\Exceptions\SandboxTimeoutException;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
+use Symfony\Component\Process\Process;
 
 class DockerSandboxService implements SandboxManagerInterface
 {
@@ -54,26 +57,52 @@ class DockerSandboxService implements SandboxManagerInterface
     }
 
     /**
-     * Run a command within the sandbox workspace.
+     * Run a command within the sandbox workspace with strict execution & idle timeouts.
+     *
+     * @throws SandboxTimeoutException
      */
-    public function runCommand(string $workspaceId, string $command, int $timeout = 120): ProcessResult
+    public function runCommand(string $workspaceId, string $command, ?int $timeout = null): ProcessResult
     {
         $workspacePath = $this->createWorkspace($workspaceId);
+        $timeoutLimit = $timeout ?? (int) config('patchops.timeouts.sandbox_command', 180);
+        $idleLimit = (int) config('patchops.timeouts.sandbox_idle', 60);
+
         $startTime = microtime(true);
 
-        $result = Process::path($workspacePath)
-            ->timeout($timeout)
-            ->run($command);
+        try {
+            $process = Process::fromShellCommandline($command, $workspacePath);
+            $process->setTimeout($timeoutLimit);
+            if ($idleLimit > 0) {
+                $process->setIdleTimeout($idleLimit);
+            }
 
-        $executionTime = microtime(true) - $startTime;
+            $process->run();
 
-        return new ProcessResult(
-            success: $result->successful(),
-            exitCode: $result->exitCode() ?? 1,
-            stdout: $result->output(),
-            stderr: $result->errorOutput(),
-            executionTimeSeconds: round($executionTime, 3),
-        );
+            $executionTime = microtime(true) - $startTime;
+
+            return new ProcessResult(
+                success: $process->isSuccessful(),
+                exitCode: $process->getExitCode() ?? 1,
+                stdout: $process->getOutput(),
+                stderr: $process->getErrorOutput(),
+                executionTimeSeconds: round($executionTime, 3),
+            );
+        } catch (ProcessTimedOutException $e) {
+            $executionTime = microtime(true) - $startTime;
+
+            Log::error("Sandbox process timed out after {$timeoutLimit}s in workspace [{$workspaceId}]: {$command}", [
+                'workspace_id' => $workspaceId,
+                'command' => $command,
+                'timeout' => $timeoutLimit,
+                'elapsed_seconds' => round($executionTime, 3),
+            ]);
+
+            throw new SandboxTimeoutException(
+                "Sandbox process exceeded timeout limit of {$timeoutLimit}s for command [{$command}]: {$e->getMessage()}",
+                0,
+                $e
+            );
+        }
     }
 
     /**

@@ -3,9 +3,13 @@
 namespace App\Jobs\Concerns;
 
 use App\Enums\IncidentStatus;
+use App\Exceptions\SandboxTimeoutException;
 use App\Services\Incident\IncidentStateMachine;
 use DateTimeInterface;
+use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Throwable;
 
 trait HandlesAgentTechnicalRetries
@@ -40,11 +44,37 @@ trait HandlesAgentTechnicalRetries
     }
 
     /**
-     * Handle a job failure when technical retries are completely exhausted.
+     * Handle a job failure when technical retries are completely exhausted or timed out.
      */
     public function handleTechnicalFailure(Throwable $exception, string $agentName): void
     {
         $attempts = method_exists($this, 'attempts') ? $this->attempts() : $this->tries;
+        $timeoutLimit = property_exists($this, 'timeout') ? $this->timeout : 120;
+        $isTimeout = $this->isTimeoutException($exception);
+
+        if ($isTimeout) {
+            Log::error("Job [{$agentName}] timed out after {$timeoutLimit}s: {$exception->getMessage()}", [
+                'correlation_id' => $this->incident->correlation_id,
+                'incident_id' => $this->incident->id,
+                'timeout_limit' => $timeoutLimit,
+                'attempts' => $attempts,
+            ]);
+
+            app(IncidentStateMachine::class)->transition(
+                incident: $this->incident,
+                targetStatus: IncidentStatus::ESCALATED,
+                reason: "Execution timed out in {$agentName} after {$timeoutLimit}s limit.",
+                actorType: 'system',
+                actorId: 'timeout-handler',
+                metadata: [
+                    'timeout_limit' => $timeoutLimit,
+                    'error' => $exception->getMessage(),
+                    'attempts' => $attempts,
+                ],
+            );
+
+            return;
+        }
 
         Log::error("Job [{$agentName}] failed after exhausting technical retries: {$exception->getMessage()}", [
             'correlation_id' => $this->incident->correlation_id,
@@ -64,5 +94,26 @@ trait HandlesAgentTechnicalRetries
                 'attempts' => $attempts,
             ],
         );
+    }
+
+    /**
+     * Determine whether an exception indicates an execution timeout.
+     */
+    protected function isTimeoutException(Throwable $exception): bool
+    {
+        if (
+            $exception instanceof SandboxTimeoutException ||
+            $exception instanceof ProcessTimedOutException ||
+            $exception instanceof TimeoutExceededException ||
+            $exception instanceof MaxAttemptsExceededException
+        ) {
+            return true;
+        }
+
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'timed out')
+            || str_contains($message, 'timeout')
+            || str_contains($message, 'curl error 28');
     }
 }

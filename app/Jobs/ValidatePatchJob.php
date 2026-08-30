@@ -22,10 +22,8 @@ class ValidatePatchJob implements ShouldQueue
 
     /**
      * The number of seconds the job can run before timing out.
-     *
-     * @var int
      */
-    public $timeout = 300;
+    public int $timeout = 900;
 
     /**
      * Create a new job instance.
@@ -34,6 +32,7 @@ class ValidatePatchJob implements ShouldQueue
         public Incident $incident,
     ) {
         $this->onQueue('incidents');
+        $this->timeout = (int) config('patchops.timeouts.validate_job', 900);
     }
 
     /**
@@ -72,7 +71,7 @@ class ValidatePatchJob implements ShouldQueue
     public function failed(?Throwable $exception): void
     {
         if ($exception) {
-            $this->handleTechnicalFailure($exception, 'ValidationAgent');
+            $this->handleTechnicalFailure($exception, 'ValidatePatchJob');
         }
     }
 }

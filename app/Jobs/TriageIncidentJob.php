@@ -21,12 +21,18 @@ class TriageIncidentJob implements ShouldQueue
     use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
+     * The number of seconds the job can run before timing out.
+     */
+    public int $timeout = 120;
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
         public Incident $incident,
     ) {
         $this->onQueue('incidents');
+        $this->timeout = (int) config('patchops.timeouts.triage_job', 120);
     }
 
     /**
@@ -62,7 +68,7 @@ class TriageIncidentJob implements ShouldQueue
     public function failed(?Throwable $exception): void
     {
         if ($exception) {
-            $this->handleTechnicalFailure($exception, 'TriageAgent');
+            $this->handleTechnicalFailure($exception, 'TriageIncidentJob');
         }
     }
 }

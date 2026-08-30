@@ -40,11 +40,11 @@ test('Job failed hook transitions incident to ESCALATED when technical retries a
     $incident = Incident::factory()->create(['status' => IncidentStatus::TRIAGING]);
 
     $job = new TriageIncidentJob($incident);
-    $job->failed(new RuntimeException('cURL error 28: Connection timed out after 60000 milliseconds'));
+    $job->failed(new RuntimeException('cURL error 7: Failed to connect to host'));
 
     $incident->refresh();
     expect($incident->status)->toBe(IncidentStatus::ESCALATED)
-        ->and($incident->transitions->last()->reason)->toContain('Technical infrastructure failure in TriageAgent: cURL error 28');
+        ->and($incident->transitions->last()->reason)->toContain('Technical infrastructure failure in TriageIncidentJob: cURL error 7');
 });
 
 test('TriageAgent throws TransientAgentInfrastructureException on 429 and 503 HTTP errors to trigger queue retries', function () {

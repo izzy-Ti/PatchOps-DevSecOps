@@ -22,10 +22,8 @@ class ReproduceIncidentJob implements ShouldQueue
 
     /**
      * The number of seconds the job can run before timing out.
-     *
-     * @var int
      */
-    public $timeout = 300;
+    public int $timeout = 600;
 
     /**
      * Create a new job instance.
@@ -34,6 +32,7 @@ class ReproduceIncidentJob implements ShouldQueue
         public Incident $incident,
     ) {
         $this->onQueue('incidents');
+        $this->timeout = (int) config('patchops.timeouts.reproduce_job', 600);
     }
 
     /**
@@ -69,7 +68,7 @@ class ReproduceIncidentJob implements ShouldQueue
     public function failed(?Throwable $exception): void
     {
         if ($exception) {
-            $this->handleTechnicalFailure($exception, 'ReproductionAgent');
+            $this->handleTechnicalFailure($exception, 'ReproduceIncidentJob');
         }
     }
 }

@@ -22,10 +22,8 @@ class GeneratePatchJob implements ShouldQueue
 
     /**
      * The number of seconds the job can run before timing out.
-     *
-     * @var int
      */
-    public $timeout = 300;
+    public int $timeout = 300;
 
     /**
      * Create a new job instance.
@@ -34,6 +32,7 @@ class GeneratePatchJob implements ShouldQueue
         public Incident $incident,
     ) {
         $this->onQueue('incidents');
+        $this->timeout = (int) config('patchops.timeouts.patch_job', 300);
     }
 
     /**
@@ -72,7 +71,7 @@ class GeneratePatchJob implements ShouldQueue
     public function failed(?Throwable $exception): void
     {
         if ($exception) {
-            $this->handleTechnicalFailure($exception, 'PatchAgent');
+            $this->handleTechnicalFailure($exception, 'GeneratePatchJob');
         }
     }
 }
