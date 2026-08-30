@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Agents\TriageAgent;
 use App\Enums\IncidentStatus;
 use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
+use App\Jobs\Concerns\TracksAgentRuns;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -18,7 +19,7 @@ use Throwable;
 
 class TriageIncidentJob implements ShouldQueue
 {
-    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels, TracksAgentRuns;
 
     /**
      * The number of seconds the job can run before timing out.
@@ -57,7 +58,19 @@ class TriageIncidentJob implements ShouldQueue
             );
         }
 
-        $result = $agent->analyze($this->incident);
+        $inputContext = [
+            'incident_number' => $this->incident->incident_number,
+            'title' => $this->incident->title,
+            'repository' => $this->incident->repository,
+            'vulnerability_id' => $this->incident->vulnerability_id,
+        ];
+
+        $result = $this->trackAgentExecution(
+            agentType: 'triage',
+            attempt: 1,
+            inputContext: $inputContext,
+            execution: fn () => $agent->analyze($this->incident)
+        );
 
         $orchestrator->handleTriageResult($this->incident, $result);
     }

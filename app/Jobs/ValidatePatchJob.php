@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Agents\ValidationAgent;
 use App\Enums\IncidentStatus;
 use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
+use App\Jobs\Concerns\TracksAgentRuns;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -18,7 +19,7 @@ use Throwable;
 
 class ValidatePatchJob implements ShouldQueue
 {
-    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels, TracksAgentRuns;
 
     /**
      * The number of seconds the job can run before timing out.
@@ -60,7 +61,20 @@ class ValidatePatchJob implements ShouldQueue
             );
         }
 
-        $result = $agent->validate($this->incident);
+        $attempt = max(1, $this->incident->getPatchAttempts() + 1);
+        $inputContext = [
+            'incident_number' => $this->incident->incident_number,
+            'attempt' => $attempt,
+            'diff' => $this->incident->metadata['diff'] ?? null,
+            'fix_summary' => $this->incident->metadata['fix_summary'] ?? null,
+        ];
+
+        $result = $this->trackAgentExecution(
+            agentType: 'validation',
+            attempt: $attempt,
+            inputContext: $inputContext,
+            execution: fn () => $agent->validate($this->incident)
+        );
 
         $orchestrator->handleValidationResult($this->incident, $result);
     }

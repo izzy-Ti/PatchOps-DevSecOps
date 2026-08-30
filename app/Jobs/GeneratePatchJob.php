@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Agents\PatchAgent;
 use App\Enums\IncidentStatus;
 use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
+use App\Jobs\Concerns\TracksAgentRuns;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -18,7 +19,7 @@ use Throwable;
 
 class GeneratePatchJob implements ShouldQueue
 {
-    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels, TracksAgentRuns;
 
     /**
      * The number of seconds the job can run before timing out.
@@ -60,7 +61,20 @@ class GeneratePatchJob implements ShouldQueue
             );
         }
 
-        $result = $agent->generatePatch($this->incident);
+        $attempt = max(1, $this->incident->getPatchAttempts() + 1);
+        $inputContext = [
+            'incident_number' => $this->incident->incident_number,
+            'attempt' => $attempt,
+            'last_validation_feedback' => $this->incident->getLatestValidationFeedback(),
+            'metadata' => $this->incident->metadata,
+        ];
+
+        $result = $this->trackAgentExecution(
+            agentType: 'patch',
+            attempt: $attempt,
+            inputContext: $inputContext,
+            execution: fn () => $agent->generatePatch($this->incident)
+        );
 
         $orchestrator->handlePatchResult($this->incident, $result);
     }

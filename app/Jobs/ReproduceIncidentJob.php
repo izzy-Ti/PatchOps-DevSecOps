@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Agents\ReproductionAgent;
 use App\Enums\IncidentStatus;
 use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
+use App\Jobs\Concerns\TracksAgentRuns;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -18,7 +19,7 @@ use Throwable;
 
 class ReproduceIncidentJob implements ShouldQueue
 {
-    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels, TracksAgentRuns;
 
     /**
      * The number of seconds the job can run before timing out.
@@ -57,7 +58,19 @@ class ReproduceIncidentJob implements ShouldQueue
             );
         }
 
-        $result = $agent->reproduce($this->incident);
+        $inputContext = [
+            'incident_number' => $this->incident->incident_number,
+            'title' => $this->incident->title,
+            'repository' => $this->incident->repository,
+            'metadata' => $this->incident->metadata,
+        ];
+
+        $result = $this->trackAgentExecution(
+            agentType: 'reproduction',
+            attempt: 1,
+            inputContext: $inputContext,
+            execution: fn () => $agent->reproduce($this->incident)
+        );
 
         $orchestrator->handleReproductionResult($this->incident, $result);
     }

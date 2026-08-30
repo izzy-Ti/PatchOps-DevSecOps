@@ -242,4 +242,14 @@ class Incident extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    /**
+     * Get the execution history of agents for this incident.
+     *
+     * @return HasMany<AgentRun, $this>
+     */
+    public function agentRuns(): HasMany
+    {
+        return $this->hasMany(AgentRun::class)->orderBy('id', 'asc');
+    }
 }
