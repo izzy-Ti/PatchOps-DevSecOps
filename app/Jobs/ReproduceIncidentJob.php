@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Agents\ReproductionAgent;
 use App\Enums\IncidentStatus;
+use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -13,10 +14,11 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ReproduceIncidentJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
      * The number of seconds the job can run before timing out.
@@ -59,5 +61,15 @@ class ReproduceIncidentJob implements ShouldQueue
         $result = $agent->reproduce($this->incident);
 
         $orchestrator->handleReproductionResult($this->incident, $result);
+    }
+
+    /**
+     * Handle technical retry exhaustion.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        if ($exception) {
+            $this->handleTechnicalFailure($exception, 'ReproductionAgent');
+        }
     }
 }

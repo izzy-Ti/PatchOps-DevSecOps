@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Agents\TriageAgent;
 use App\Enums\IncidentStatus;
+use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -13,10 +14,11 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class TriageIncidentJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
      * Create a new job instance.
@@ -52,5 +54,15 @@ class TriageIncidentJob implements ShouldQueue
         $result = $agent->analyze($this->incident);
 
         $orchestrator->handleTriageResult($this->incident, $result);
+    }
+
+    /**
+     * Handle technical retry exhaustion.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        if ($exception) {
+            $this->handleTechnicalFailure($exception, 'TriageAgent');
+        }
     }
 }

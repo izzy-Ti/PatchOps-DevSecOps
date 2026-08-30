@@ -155,7 +155,7 @@ test('GeneratePatchJob escalates incident when patch synthesis fails', function 
     config()->set('services.anthropic.key', 'sk-ant-test-key');
 
     Http::fake([
-        'https://api.anthropic.com/v1/messages' => Http::response(['error' => 'Model overloaded'], 503),
+        'https://api.anthropic.com/v1/messages' => Http::response(['error' => 'Invalid Schema'], 400),
     ]);
 
     $incident = Incident::factory()->create([

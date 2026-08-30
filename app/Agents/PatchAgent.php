@@ -3,7 +3,9 @@
 namespace App\Agents;
 
 use App\DTOs\PatchResultDTO;
+use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -126,6 +128,10 @@ DIFF;
                 'content-type' => 'application/json',
             ])->timeout(90)->post('https://api.anthropic.com/v1/messages', $payload);
 
+            if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
+                throw new TransientAgentInfrastructureException("Claude API transient status during patch synthesis [{$response->status()}]: {$response->body()}");
+            }
+
             if (! $response->successful()) {
                 Log::error('Claude API returned error during patch synthesis.', [
                     'incident_id' => $incident->id,
@@ -161,6 +167,10 @@ DIFF;
                 reason: 'Claude API responded without calling record_patch_synthesis tool.',
                 raw: $responseData,
             );
+        } catch (ConnectionException $e) {
+            throw new TransientAgentInfrastructureException("Network connection error during patch synthesis: {$e->getMessage()}", 0, $e);
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
         } catch (Throwable $e) {
             Log::error('Exception occurred during PatchAgent execution.', [
                 'incident_id' => $incident->id,

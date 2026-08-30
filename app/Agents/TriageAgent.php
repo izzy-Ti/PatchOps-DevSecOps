@@ -3,7 +3,9 @@
 namespace App\Agents;
 
 use App\DTOs\TriageResultDTO;
+use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -103,6 +105,10 @@ PROMPT;
                 'content-type' => 'application/json',
             ])->timeout(60)->post('https://api.anthropic.com/v1/messages', $payload);
 
+            if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
+                throw new TransientAgentInfrastructureException("Claude API transient status [{$response->status()}]: {$response->body()}");
+            }
+
             if (! $response->successful()) {
                 Log::error('Anthropic API returned error during triage analysis.', [
                     'incident_id' => $incident->id,
@@ -134,6 +140,10 @@ PROMPT;
                 errorMessage: 'Claude API responded without calling the record_triage_analysis tool.',
                 raw: $responseData,
             );
+        } catch (ConnectionException $e) {
+            throw new TransientAgentInfrastructureException("Network connection error during triage: {$e->getMessage()}", 0, $e);
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
         } catch (Throwable $e) {
             Log::error('Exception occurred during TriageAgent execution.', [
                 'incident_id' => $incident->id,

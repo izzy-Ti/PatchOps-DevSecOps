@@ -3,8 +3,10 @@
 namespace App\Agents;
 
 use App\DTOs\ValidationResultDTO;
+use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
 use App\Services\Sandbox\SandboxManagerInterface;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -61,6 +63,8 @@ PROMPT;
                 buildOutput: "Build completed successfully. Exit code {$testProcess->exitCode}.",
                 testExitCode: $testProcess->exitCode,
             );
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
         } catch (Throwable $e) {
             Log::error('Exception occurred during ValidationAgent execution.', [
                 'incident_id' => $incident->id,
@@ -166,6 +170,10 @@ PROMPT;
                 'content-type' => 'application/json',
             ])->timeout(60)->post('https://api.anthropic.com/v1/messages', $payload);
 
+            if (in_array($response->status(), [429, 500, 502, 503, 504], true)) {
+                throw new TransientAgentInfrastructureException("Claude API transient status during validation [{$response->status()}]: {$response->body()}");
+            }
+
             if (! $response->successful()) {
                 return ValidationResultDTO::failed(
                     feedback: "Claude API error during validation: {$response->status()} - {$response->body()}",
@@ -205,6 +213,10 @@ PROMPT;
                 testOutput: $testOutput,
                 buildOutput: $buildOutput,
             );
+        } catch (ConnectionException $e) {
+            throw new TransientAgentInfrastructureException("Network connection error during validation: {$e->getMessage()}", 0, $e);
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
         } catch (Throwable $e) {
             return ValidationResultDTO::failed(
                 feedback: "Validation evaluation exception: {$e->getMessage()}",

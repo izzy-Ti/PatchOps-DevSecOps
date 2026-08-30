@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Agents\PatchAgent;
 use App\Enums\IncidentStatus;
+use App\Jobs\Concerns\HandlesAgentTechnicalRetries;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
 use App\Workflows\IncidentOrchestrator;
@@ -13,10 +14,11 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class GeneratePatchJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HandlesAgentTechnicalRetries, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
      * The number of seconds the job can run before timing out.
@@ -62,5 +64,15 @@ class GeneratePatchJob implements ShouldQueue
         $result = $agent->generatePatch($this->incident);
 
         $orchestrator->handlePatchResult($this->incident, $result);
+    }
+
+    /**
+     * Handle technical retry exhaustion.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        if ($exception) {
+            $this->handleTechnicalFailure($exception, 'PatchAgent');
+        }
     }
 }

@@ -96,13 +96,13 @@ test('TriageAgent analyzes incident and returns structured TriageResultDTO via C
         ->and($result->reason)->toContain('Remote Code Execution');
 });
 
-test('TriageAgent gracefully handles Claude API error', function () {
+test('TriageAgent gracefully handles Claude API non-transient error', function () {
     config()->set('services.anthropic.key', 'sk-ant-test-key');
 
     Http::fake([
         'https://api.anthropic.com/v1/messages' => Http::response([
-            'error' => ['type' => 'rate_limit_error', 'message' => 'Rate limit exceeded'],
-        ], 429),
+            'error' => ['type' => 'invalid_request_error', 'message' => 'Invalid request payload'],
+        ], 400),
     ]);
 
     $incident = Incident::factory()->create(['status' => IncidentStatus::RECEIVED]);
@@ -111,7 +111,7 @@ test('TriageAgent gracefully handles Claude API error', function () {
     $result = $agent->analyze($incident);
 
     expect($result->isValid())->toBeFalse()
-        ->and($result->errorMessage)->toContain('Anthropic API error: 429');
+        ->and($result->errorMessage)->toContain('Anthropic API error: 400');
 });
 
 test('TriageIncidentJob executes full triage flow from RECEIVED to PRIORITIZED and dispatches reproduction job', function () {
@@ -164,7 +164,7 @@ test('TriageIncidentJob escalates incident when triage fails', function () {
     config()->set('services.anthropic.key', 'sk-ant-test-key');
 
     Http::fake([
-        'https://api.anthropic.com/v1/messages' => Http::response(['error' => 'API Unavailable'], 500),
+        'https://api.anthropic.com/v1/messages' => Http::response(['error' => 'Invalid Schema'], 400),
     ]);
 
     $incident = Incident::factory()->create([
