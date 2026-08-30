@@ -21,6 +21,11 @@ use App\Services\Incident\IncidentStateMachine;
 class IncidentOrchestrator
 {
     /**
+     * Maximum allowed automated patch synthesis retry attempts before escalation.
+     */
+    public const MAX_PATCH_ITERATIONS = 3;
+
+    /**
      * Create a new orchestrator instance.
      */
     public function __construct(
@@ -230,11 +235,12 @@ class IncidentOrchestrator
     }
 
     /**
-     * Handle the structured result from ValidationAgent.
+     * Handle the structured result from ValidationAgent with repair feedback loop & max attempts boundary.
      */
     public function handleValidationResult(Incident $incident, ValidationResultDTO $result): void
     {
         if ($result->passed) {
+            $attempts = $incident->getPatchAttempts();
             $incident->metadata = array_merge($incident->metadata ?? [], [
                 'validation_test_output' => $result->testOutput,
                 'validation_build_output' => $result->buildOutput,
@@ -246,33 +252,63 @@ class IncidentOrchestrator
             $this->stateMachine->transition(
                 incident: $incident,
                 targetStatus: IncidentStatus::AWAITING_APPROVAL,
-                reason: $result->summary ?? 'Patch validation passed all regression tests and security scans.',
+                reason: "Patch successfully verified on attempt {$attempts}",
                 actorType: 'agent',
                 actorId: 'validation-agent',
                 metadata: [
                     'summary' => $result->summary,
+                    'attempts' => $attempts,
                 ],
             );
         } else {
+            $currentAttempt = $incident->incrementPatchAttempts();
+
+            $historyItem = [
+                'attempt' => $currentAttempt,
+                'diff' => $incident->metadata['diff'] ?? null,
+                'feedback' => $result->feedback,
+                'test_output' => $result->testOutput,
+                'build_output' => $result->buildOutput,
+                'failed_at' => now()->toIso8601String(),
+            ];
+            $history = $incident->metadata['validation_history'] ?? [];
+            $history[] = $historyItem;
+
             $incident->metadata = array_merge($incident->metadata ?? [], [
                 'last_validation_feedback' => $result->feedback,
                 'validation_test_output' => $result->testOutput,
                 'validation_build_output' => $result->buildOutput,
+                'validation_history' => $history,
             ]);
             $incident->save();
 
-            $this->stateMachine->transition(
-                incident: $incident,
-                targetStatus: IncidentStatus::PATCHING,
-                reason: 'Validation failed: '.($result->feedback ?? 'Automated test or build failure.'),
-                actorType: 'agent',
-                actorId: 'validation-agent',
-                metadata: [
-                    'feedback' => $result->feedback,
-                ],
-            );
+            if ($currentAttempt < self::MAX_PATCH_ITERATIONS) {
+                $this->stateMachine->transition(
+                    incident: $incident,
+                    targetStatus: IncidentStatus::PATCHING,
+                    reason: "Validation failed (Attempt {$currentAttempt}/".self::MAX_PATCH_ITERATIONS.'). Retrying patch synthesis.',
+                    actorType: 'agent',
+                    actorId: 'validation-agent',
+                    metadata: [
+                        'feedback' => $result->feedback,
+                        'attempt' => $currentAttempt,
+                    ],
+                );
 
-            GeneratePatchJob::dispatch($incident)->onQueue('incidents');
+                GeneratePatchJob::dispatch($incident)->onQueue('incidents');
+            } else {
+                $this->stateMachine->transition(
+                    incident: $incident,
+                    targetStatus: IncidentStatus::ESCALATED,
+                    reason: 'Exhausted maximum patch attempts ('.self::MAX_PATCH_ITERATIONS.'). Manual intervention required.',
+                    actorType: 'agent',
+                    actorId: 'validation-agent',
+                    metadata: [
+                        'feedback' => $result->feedback,
+                        'attempts' => $currentAttempt,
+                    ],
+                );
+            }
         }
     }
 }

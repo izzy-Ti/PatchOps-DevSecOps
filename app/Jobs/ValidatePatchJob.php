@@ -42,7 +42,10 @@ class ValidatePatchJob implements ShouldQueue
         IncidentOrchestrator $orchestrator,
         IncidentStateMachine $stateMachine,
     ): void {
-        Log::withContext(['correlation_id' => $this->incident->correlation_id]);
+        Log::withContext([
+            'correlation_id' => $this->incident->correlation_id,
+            'patch_attempt' => $this->incident->getPatchAttempts(),
+        ]);
 
         $this->incident->refresh();
 

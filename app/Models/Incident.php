@@ -79,6 +79,36 @@ class Incident extends Model
     }
 
     /**
+     * Get the current count of patch attempts.
+     */
+    public function getPatchAttempts(): int
+    {
+        return (int) ($this->metadata['patch_attempts'] ?? 0);
+    }
+
+    /**
+     * Increment the patch attempt count and persist to metadata.
+     */
+    public function incrementPatchAttempts(): int
+    {
+        $current = $this->getPatchAttempts() + 1;
+        $this->metadata = array_merge($this->metadata ?? [], [
+            'patch_attempts' => $current,
+        ]);
+        $this->save();
+
+        return $current;
+    }
+
+    /**
+     * Get the latest validation failure feedback for the repair loop.
+     */
+    public function getLatestValidationFeedback(): ?string
+    {
+        return $this->metadata['last_validation_feedback'] ?? null;
+    }
+
+    /**
      * Transition the incident to a new status via the dedicated State Machine service.
      *
      * @param  array<string, mixed>  $metadata

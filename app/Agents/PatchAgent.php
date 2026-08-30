@@ -210,6 +210,25 @@ DIFF;
             }
         }
 
+        $attempts = $incident->getPatchAttempts();
+        $latestFeedback = $incident->getLatestValidationFeedback();
+        if ($attempts > 0 || ! empty($latestFeedback)) {
+            $lines[] = "\n## PREVIOUS ATTEMPT FAILED (Attempt {$attempts} of 3)";
+            $lines[] = 'Your previous patch attempt failed validation. Adjust your fix to resolve the root cause while addressing these failure diagnostics:';
+            if (! empty($latestFeedback)) {
+                $lines[] = "- Validation Feedback: {$latestFeedback}";
+            }
+            if (! empty($meta['validation_test_output'])) {
+                $lines[] = "- Test Failure Output:\n```\n{$meta['validation_test_output']}\n```";
+            }
+            if (! empty($meta['validation_build_output'])) {
+                $lines[] = "- Build Output:\n```\n{$meta['validation_build_output']}\n```";
+            }
+            if (! empty($meta['diff'])) {
+                $lines[] = "- Previous Failed Diff:\n```diff\n{$meta['diff']}\n```";
+            }
+        }
+
         return implode("\n", $lines);
     }
 }
