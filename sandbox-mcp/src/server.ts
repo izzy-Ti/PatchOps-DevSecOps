@@ -170,7 +170,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 // 2. Dispatch Tool Invocation Requests
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
   const { name, arguments: args = {} } = request.params;
 
   try {
@@ -234,13 +234,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 // 3. Connect to STDIO transport
-async function main() {
+async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('[PatchOps] Sandbox MCP Server initialized over STDIO transport.');
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error('[PatchOps] Fatal error starting Sandbox MCP Server:', err);
   process.exit(1);
 });
