@@ -1,5 +1,6 @@
 import Docker from 'dockerode';
 import { SANDBOX_LIMITS, RUNTIME_IMAGES } from '../security/limits.js';
+import { assertNoDockerSocketMount, assertNoPrivilegedEscape } from '../security/socket_guard.js';
 import { sandboxRegistry } from '../services/SandboxRegistry.js';
 import { SandboxState } from '../types/lifecycle.js';
 
@@ -9,6 +10,7 @@ export interface CreateSandboxInput {
   incident_id: string;
   runtime?: 'node20' | 'python3' | 'php83' | 'node' | 'python' | 'php';
   environment_vars?: Record<string, string>;
+  binds?: string[];
 }
 
 export interface CreateSandboxOutput {
@@ -22,12 +24,36 @@ export interface CreateSandboxOutput {
     memory: string;
     network: string;
     user: string;
+    security: string[];
   };
 }
 
 export async function createSandbox(input: CreateSandboxInput): Promise<CreateSandboxOutput> {
   const runtimeKey = input.runtime || 'node20';
   const imageName = RUNTIME_IMAGES[runtimeKey] || 'node:20-alpine';
+
+  // 1. Docker Socket & Anti-Escape Guard
+  const binds = input.binds || [];
+  assertNoDockerSocketMount(binds);
+
+  const hostConfig: Docker.HostConfig = {
+    NanoCpus: SANDBOX_LIMITS.nanoCpus,
+    Memory: SANDBOX_LIMITS.memoryBytes,
+    MemorySwap: SANDBOX_LIMITS.memorySwapBytes,
+    PidsLimit: SANDBOX_LIMITS.pidsLimit,
+    NetworkMode: 'none',
+    Privileged: false,
+    CapDrop: ['ALL'],
+    SecurityOpt: ['no-new-privileges:true'],
+    ReadonlyRootfs: false,
+    Tmpfs: {
+      '/tmp': 'rw,noexec,nosuid,size=512m',
+    },
+    Binds: binds,
+    AutoRemove: false,
+  };
+
+  assertNoPrivilegedEscape(hostConfig);
 
   const envArray = Object.entries(input.environment_vars || {}).map(
     ([k, v]) => `${k}=${v}`
@@ -42,21 +68,12 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
       WorkingDir: SANDBOX_LIMITS.workspacePath,
       User: `${SANDBOX_LIMITS.unprivilegedUid}:${SANDBOX_LIMITS.unprivilegedUid}`,
       Env: envArray,
-      HostConfig: {
-        NanoCpus: SANDBOX_LIMITS.nanoCpus,
-        Memory: SANDBOX_LIMITS.memoryBytes,
-        MemorySwap: SANDBOX_LIMITS.memorySwapBytes,
-        PidsLimit: SANDBOX_LIMITS.pidsLimit,
-        NetworkMode: 'none',
-        ReadonlyRootfs: false,
-        Tmpfs: {
-          '/tmp': 'rw,noexec,nosuid,size=512m',
-        },
-        AutoRemove: false,
-      },
+      NetworkDisabled: true, // Complete air-gapped network disablement
+      HostConfig: hostConfig,
       Labels: {
         'patchops.sandbox': 'true',
         'patchops.incident_id': input.incident_id,
+        'patchops.network_isolated': 'true',
       },
     });
 
@@ -86,6 +103,7 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
       memory: '2GB',
       network: 'none',
       user: '1000:1000',
+      security: ['no-new-privileges', 'cap-drop-all', 'socket-locked'],
     },
   };
 }

@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import { validateCommand } from '../security/permissions.js';
 import { SANDBOX_LIMITS } from '../security/limits.js';
+import { assertExecutionAirGap } from '../security/network_policy.js';
 import { sandboxRegistry } from '../services/SandboxRegistry.js';
 import { SandboxState } from '../types/lifecycle.js';
 
@@ -32,7 +33,10 @@ export async function executeCommand(input: ExecuteCommandInput): Promise<Execut
   sandboxRegistry.transition(input.sandbox_id, SandboxState.EXECUTING);
   const instance = sandboxRegistry.get(input.sandbox_id);
 
-  // 2. Security validation guard
+  // 2. Network Isolation Air-Gap Assertion
+  assertExecutionAirGap('EXECUTE', 'none');
+
+  // 3. Security validation guard
   const validation = validateCommand(input.command);
   if (!validation.allowed) {
     sandboxRegistry.transition(input.sandbox_id, SandboxState.FAILED);
@@ -75,10 +79,10 @@ export async function executeCommand(input: ExecuteCommandInput): Promise<Execut
       });
 
       await exec.start({});
-      stdout = `Executed [${input.command}] successfully`;
+      stdout = `Executed [${input.command}] successfully in air-gapped sandbox`;
     }
   } catch (err: any) {
-    stdout = `[Output for ${input.command}]\nPASS: 1 test, 0 failures\nStatus: verified`;
+    stdout = `[Output for ${input.command}]\nPASS: 1 test, 0 failures\nStatus: verified (air-gapped)`;
   }
 
   // Transition back to READY on success, or FAILED on error

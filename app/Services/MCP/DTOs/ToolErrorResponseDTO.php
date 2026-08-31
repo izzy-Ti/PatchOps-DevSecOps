@@ -21,6 +21,8 @@ readonly class ToolErrorResponseDTO implements JsonSerializable
 {
     public const PERMISSION_DENIED = 'PERMISSION_DENIED';
 
+    public const FORBIDDEN_HOST_CAPABILITY = 'FORBIDDEN_HOST_CAPABILITY';
+
     public const RESOURCE_OUT_OF_SCOPE = 'RESOURCE_OUT_OF_SCOPE';
 
     public const INVALID_ARGUMENTS = 'INVALID_ARGUMENTS';
@@ -65,8 +67,17 @@ readonly class ToolErrorResponseDTO implements JsonSerializable
         ], $extraDetails);
 
         return match (true) {
+            $e instanceof ForbiddenHostCapabilityException => new self(
+                code: self::FORBIDDEN_HOST_CAPABILITY,
+                message: $e->getMessage(),
+                retryable: false,
+                details: array_merge($details, [
+                    'capability' => $e->capability,
+                    'violating_payload' => $e->violatingPayload,
+                ]),
+            ),
+
             $e instanceof UnauthorizedToolException,
-            $e instanceof ForbiddenHostCapabilityException,
             $e instanceof UnauthorizedCriticalActionException => new self(
                 code: self::PERMISSION_DENIED,
                 message: $e->getMessage(),

@@ -19,6 +19,7 @@ use App\Services\MCP\Guards\RepositoryAccessGuard;
 use App\Services\MCP\Guards\SandboxExecutionGuard;
 use App\Services\MCP\Guards\SandboxLifecycleGuard;
 use App\Services\MCP\Guards\ToolRiskLevelGuard;
+use App\Services\Sandbox\Guards\SandboxSecurityAuditGuard;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\ToolNotFoundException;
 use App\Tools\Permissions\ToolScope;
@@ -35,6 +36,7 @@ class MCPToolGateway
         protected ?RepositoryAccessGuard $repositoryGuard = null,
         protected ?SandboxExecutionGuard $sandboxGuard = null,
         protected ?SandboxLifecycleGuard $sandboxLifecycleGuard = null,
+        protected ?SandboxSecurityAuditGuard $sandboxAuditGuard = null,
         protected ?ToolRiskLevelGuard $riskLevelGuard = null,
         protected ?HitlApprovalGuard $hitlGuard = null,
         protected ?AgentExecutionBudgetGuard $budgetGuard = null,
@@ -45,6 +47,7 @@ class MCPToolGateway
         $this->repositoryGuard ??= app(RepositoryAccessGuard::class);
         $this->sandboxGuard ??= app(SandboxExecutionGuard::class);
         $this->sandboxLifecycleGuard ??= app(SandboxLifecycleGuard::class);
+        $this->sandboxAuditGuard ??= app(SandboxSecurityAuditGuard::class);
         $this->riskLevelGuard ??= app(ToolRiskLevelGuard::class);
         $this->hitlGuard ??= app(HitlApprovalGuard::class);
         $this->budgetGuard ??= app(AgentExecutionBudgetGuard::class);
@@ -159,6 +162,9 @@ class MCPToolGateway
 
             // 6.5. Sandbox Lifecycle State Machine & Opaque Identifier Guard
             $this->sandboxLifecycleGuard->validate($context, $arguments, $toolName);
+
+            // 6.6. Docker Socket Anti-Escape & Network Isolation Audit Guard
+            $this->sandboxAuditGuard->validate($context, $arguments, $toolName);
 
             // 7. Multi-Tier Tool Risk Level Evaluation
             $this->riskLevelGuard->evaluate($tool, $arguments, $context);
