@@ -52,6 +52,7 @@ class IncidentOrchestrator
                 IncidentStatus::VALIDATING => ValidatePatchJob::dispatch($incident)->onQueue('incidents'),
                 IncidentStatus::VERIFIED => CreatePullRequestJob::dispatch($incident)->onQueue('incidents'),
                 IncidentStatus::FAILED,
+                IncidentStatus::INFRA_FAILED,
                 IncidentStatus::ESCALATED => HandleIncidentFailureJob::dispatch($incident)->onQueue('incidents'),
                 IncidentStatus::AWAITING_APPROVAL,
                 IncidentStatus::TRIAGING,

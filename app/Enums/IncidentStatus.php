@@ -10,6 +10,7 @@ enum IncidentStatus: string
     case REPRODUCING = 'reproducing';
     case REPRODUCED = 'reproduced';
     case TRIAGED_NOT_REPRODUCIBLE = 'triaged_not_reproducible';
+    case INFRA_FAILED = 'infra_failed';
     case PATCHING = 'patching';
     case VALIDATING = 'validating';
     case AWAITING_APPROVAL = 'awaiting_approval';
@@ -51,11 +52,18 @@ enum IncidentStatus: string
                 self::REPRODUCED,
                 self::TRIAGED_NOT_REPRODUCIBLE,
                 self::PRIORITIZED,
+                self::INFRA_FAILED,
                 self::FAILED,
                 self::ESCALATED,
                 self::CLOSED,
             ],
             self::TRIAGED_NOT_REPRODUCIBLE => [
+                self::PRIORITIZED,
+                self::ESCALATED,
+                self::FAILED,
+                self::CLOSED,
+            ],
+            self::INFRA_FAILED => [
                 self::PRIORITIZED,
                 self::ESCALATED,
                 self::FAILED,
@@ -136,7 +144,7 @@ enum IncidentStatus: string
      */
     public function isTerminal(): bool
     {
-        return in_array($this, [self::RESOLVED, self::CLOSED, self::FAILED, self::TRIAGED_NOT_REPRODUCIBLE], true);
+        return in_array($this, [self::RESOLVED, self::CLOSED, self::FAILED, self::TRIAGED_NOT_REPRODUCIBLE, self::INFRA_FAILED], true);
     }
 
     /**

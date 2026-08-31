@@ -5,10 +5,13 @@ namespace App\Services\Orchestration;
 use App\Agents\ReproductionAgent;
 use App\DTOs\ReproductionResultDTO;
 use App\Enums\IncidentStatus;
+use App\Exceptions\Sandbox\SandboxInfrastructureException;
+use App\Exceptions\Sandbox\SandboxTimeoutException;
 use App\Jobs\DispatchPatchAgentJob;
 use App\Jobs\ExecuteReproductionJob;
 use App\Models\Incident;
 use App\Services\Incident\IncidentStateMachine;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -102,46 +105,66 @@ class IncidentOrchestrator
     }
 
     /**
-     * Handle reproduction exception or failure with automated retries.
+     * Handle reproduction exception or failure with automated retries and semantic separation.
      */
     public function handleReproductionFailure(Incident $incident, Throwable $e): void
     {
         $meta = is_array($incident->metadata) ? $incident->metadata : (is_string($incident->metadata) ? (json_decode($incident->metadata, true) ?? []) : []);
         $currentRetries = (int) ($meta['reproduction_retries'] ?? 0) + 1;
 
+        $isInfraError = $e instanceof SandboxInfrastructureException
+            || $e instanceof SandboxTimeoutException
+            || $e instanceof ConnectionException
+            || str_contains(strtolower($e->getMessage()), 'timeout')
+            || str_contains(strtolower($e->getMessage()), 'connection');
+
         $incident->metadata = array_merge($meta, [
             'reproduction_retries' => $currentRetries,
             'last_reproduction_error' => $e->getMessage(),
+            'is_infrastructure_failure' => $isInfraError,
         ]);
         $incident->save();
 
         if ($currentRetries < 3) {
-            Log::warning("Reproduction failed for Incident [{$incident->incident_number}] (Attempt {$currentRetries}/3). Retrying...");
+            Log::warning("Reproduction failed for Incident [{$incident->incident_number}] (Attempt {$currentRetries}/3) [Infra: ".($isInfraError ? 'YES' : 'NO')."]: {$e->getMessage()}. Retrying...");
 
             if ($incident->status->canTransitionTo(IncidentStatus::PRIORITIZED)) {
                 $this->stateMachine->transition(
                     incident: $incident,
                     targetStatus: IncidentStatus::PRIORITIZED,
-                    reason: "Reproduction attempt {$currentRetries}/3 failed. Re-queuing.",
+                    reason: "Reproduction attempt {$currentRetries}/3 failed ({$e->getMessage()}). Re-queuing.",
                     actorType: 'orchestrator',
                     actorId: 'orchestrator',
-                    metadata: ['retry_attempt' => $currentRetries],
+                    metadata: ['retry_attempt' => $currentRetries, 'is_infra' => $isInfraError],
                 );
             }
 
             ExecuteReproductionJob::dispatch($incident);
         } else {
-            Log::error("Reproduction exhausted max retries for Incident [{$incident->incident_number}]. Escalating to security engineering.");
+            if ($isInfraError && $incident->status->canTransitionTo(IncidentStatus::INFRA_FAILED)) {
+                Log::critical("Reproduction exhausted max retries due to persistent infrastructure failures for Incident [{$incident->incident_number}]. Marking INFRA_FAILED.");
 
-            if ($incident->status->canTransitionTo(IncidentStatus::ESCALATED)) {
                 $this->stateMachine->transition(
                     incident: $incident,
-                    targetStatus: IncidentStatus::ESCALATED,
-                    reason: "Reproduction exhausted max retries (3): {$e->getMessage()}",
+                    targetStatus: IncidentStatus::INFRA_FAILED,
+                    reason: "Persistent sandbox infrastructure failure after 3 retries: {$e->getMessage()}",
                     actorType: 'orchestrator',
                     actorId: 'orchestrator',
-                    metadata: ['escalation_reason' => $e->getMessage(), 'retries' => $currentRetries],
+                    metadata: ['failure_reason' => $e->getMessage(), 'retries' => $currentRetries],
                 );
+            } else {
+                Log::error("Reproduction exhausted max retries for Incident [{$incident->incident_number}]. Escalating to security engineering.");
+
+                if ($incident->status->canTransitionTo(IncidentStatus::ESCALATED)) {
+                    $this->stateMachine->transition(
+                        incident: $incident,
+                        targetStatus: IncidentStatus::ESCALATED,
+                        reason: "Reproduction exhausted max retries (3): {$e->getMessage()}",
+                        actorType: 'orchestrator',
+                        actorId: 'orchestrator',
+                        metadata: ['escalation_reason' => $e->getMessage(), 'retries' => $currentRetries],
+                    );
+                }
             }
         }
     }

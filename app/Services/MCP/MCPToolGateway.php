@@ -9,6 +9,7 @@ use App\Exceptions\MCP\RepositoryAccessDeniedException;
 use App\Exceptions\MCP\ResourceAccessDeniedException;
 use App\Exceptions\MCP\UnauthorizedCriticalActionException;
 use App\Exceptions\MCP\UnauthorizedToolException;
+use App\Exceptions\Sandbox\SandboxInfrastructureException;
 use App\Models\Incident;
 use App\Models\SandboxExecution;
 use App\Models\ToolExecution;
@@ -27,6 +28,7 @@ use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\ToolNotFoundException;
 use App\Tools\Permissions\ToolScope;
 use App\Tools\ToolRegistry;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
@@ -223,11 +225,27 @@ class MCPToolGateway
             // 10. Validate Input Arguments against Schema
             $this->validateArguments($toolName, $tool->parametersSchema(), $arguments);
 
-            // 11. Monitored Tool Execution (Secrets injected securely in backend driver)
-            $rawOutput = $tool->execute($arguments, $context);
+            // 11. Monitored Tool Execution with Automatic Transient Retry Interceptor
+            $maxAttempts = 3;
+            $attempt = 1;
+            $rawOutput = null;
+
+            while ($attempt <= $maxAttempts) {
+                try {
+                    $rawOutput = $tool->execute($arguments, $context);
+                    break;
+                } catch (SandboxInfrastructureException|ConnectionException $e) {
+                    if ($attempt >= $maxAttempts) {
+                        throw $e;
+                    }
+                    Log::warning("MCPToolGateway: Transient error during [{$toolName}] (Attempt {$attempt}/{$maxAttempts}): {$e->getMessage()}. Retrying...");
+                    usleep(50000 * $attempt); // Jittered backoff (50ms, 100ms)
+                    $attempt++;
+                }
+            }
 
             // 12. Sanitize, Truncate, and Redact Secrets
-            $sanitizedOutput = $this->sanitizeResponse($rawOutput);
+            $sanitizedOutput = $this->sanitizeResponse($rawOutput ?? []);
             $budgetBoundedOutput = $this->budgetGuard->truncateOutput($sanitizedOutput, $role);
 
             $executionTime = round(microtime(true) - $startTime, 3);
