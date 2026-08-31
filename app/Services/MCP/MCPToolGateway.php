@@ -10,6 +10,7 @@ use App\Exceptions\MCP\ResourceAccessDeniedException;
 use App\Exceptions\MCP\UnauthorizedCriticalActionException;
 use App\Exceptions\MCP\UnauthorizedToolException;
 use App\Models\Incident;
+use App\Models\SandboxExecution;
 use App\Models\ToolExecution;
 use App\Services\AuditLogger;
 use App\Services\MCP\DTOs\ToolErrorResponseDTO;
@@ -18,13 +19,16 @@ use App\Services\MCP\Guards\HitlApprovalGuard;
 use App\Services\MCP\Guards\RepositoryAccessGuard;
 use App\Services\MCP\Guards\SandboxExecutionGuard;
 use App\Services\MCP\Guards\SandboxLifecycleGuard;
+use App\Services\MCP\Guards\ToolPermissionGuard;
 use App\Services\MCP\Guards\ToolRiskLevelGuard;
 use App\Services\Sandbox\Guards\SandboxSecurityAuditGuard;
+use App\Services\Tracing\TraceContext;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\ToolNotFoundException;
 use App\Tools\Permissions\ToolScope;
 use App\Tools\ToolRegistry;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 class MCPToolGateway
@@ -104,12 +108,23 @@ class MCPToolGateway
         ?int $agentRunId = null,
     ): array {
         $startTime = microtime(true);
+        $correlationId = $context->correlation_id ?: ('corr_'.Str::ulid());
+        $sandboxId = $arguments['sandbox_id'] ?? $arguments['workspace_id'] ?? null;
+
+        TraceContext::set(
+            correlationId: $correlationId,
+            incidentId: (string) $context->id,
+            agentRunId: $agentRunId ? (string) $agentRunId : null,
+            sandboxId: $sandboxId ? (string) $sandboxId : null,
+            agentRole: $role->value,
+        );
 
         Log::info("MCPToolGateway: Agent role [{$role->value}] executing tool [{$toolName}].", [
             'incident_id' => $context->id,
             'tool' => $toolName,
             'role' => $role->value,
             'agent_run_id' => $agentRunId,
+            'correlation_id' => $correlationId,
         ]);
 
         $redactedArgs = $this->redactSensitiveValues($arguments);
@@ -134,7 +149,7 @@ class MCPToolGateway
                 'status' => 'running',
                 'permission' => $permission,
                 'risk_level' => $riskLevel,
-                'correlation_id' => $context->correlation_id,
+                'correlation_id' => $correlationId,
                 'started_at' => now(),
             ]);
         } catch (Throwable $e) {
@@ -143,6 +158,8 @@ class MCPToolGateway
 
         try {
             // 3. Capability & Role Permission Authorization
+            ToolPermissionGuard::assertPermission($role, $toolName, $this->registry);
+
             if (! $this->permissionService->isAllowed($role, $toolName)) {
                 $this->finalizeExecutionRecord($executionRecord, 'denied', [
                     'error' => "Agent role [{$role->value}] is not authorized for tool [{$toolName}].",
@@ -190,7 +207,7 @@ class MCPToolGateway
                         'reason' => $e->reason,
                         'arguments' => $redactedArgs,
                     ],
-                    correlationId: $context->correlation_id,
+                    correlationId: $correlationId,
                 );
 
                 Log::critical("Security violation on incident [{$context->incident_number}]: {$e->getMessage()}");
@@ -216,6 +233,25 @@ class MCPToolGateway
             $executionTime = round(microtime(true) - $startTime, 3);
             $durationMs = round((microtime(true) - $startTime) * 1000, 2);
 
+            // 12.5. Track Sandbox Execution Telemetry if command was run
+            if (in_array($toolName, ['sandbox.execute', 'sandbox.execute_command'], true)) {
+                try {
+                    SandboxExecution::create([
+                        'incident_id' => $context->id,
+                        'sandbox_id' => (string) ($sandboxId ?? 'unknown'),
+                        'agent_run_id' => $agentRunId ? (string) $agentRunId : null,
+                        'correlation_id' => $correlationId,
+                        'command' => (string) ($arguments['command'] ?? ''),
+                        'exit_code' => (int) ($rawOutput['exit_code'] ?? 0),
+                        'stdout' => (string) ($rawOutput['stdout'] ?? ''),
+                        'stderr' => (string) ($rawOutput['stderr'] ?? ''),
+                        'duration_ms' => (float) ($rawOutput['duration_ms'] ?? $durationMs),
+                    ]);
+                } catch (Throwable $e) {
+                    Log::warning("Could not persist sandbox_executions record: {$e->getMessage()}");
+                }
+            }
+
             // 13. Finalize tool_executions record as SUCCESS
             $this->finalizeExecutionRecord($executionRecord, 'success', $budgetBoundedOutput, $startTime);
 
@@ -232,7 +268,7 @@ class MCPToolGateway
                         'execution_time_seconds' => $executionTime,
                         'duration_ms' => $durationMs,
                     ],
-                    correlationId: $context->correlation_id,
+                    correlationId: $correlationId,
                 );
             }
 

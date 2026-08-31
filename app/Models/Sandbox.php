@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'incident_id',
     'sandbox_id',
+    'agent_run_id',
+    'correlation_id',
     'runtime',
     'runtime_version',
     'repository',
