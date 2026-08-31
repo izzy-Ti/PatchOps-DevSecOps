@@ -137,6 +137,7 @@ class IncidentOrchestrator
             if ($result->success) {
                 $data = $result->data;
                 $incident->metadata = array_merge($incident->metadata ?? [], [
+                    'reproduction_result' => $data,
                     'poc_script' => $data['poc_script'] ?? null,
                     'reproduction_stdout' => $data['stdout'] ?? null,
                     'reproduction_stderr' => $data['stderr'] ?? null,

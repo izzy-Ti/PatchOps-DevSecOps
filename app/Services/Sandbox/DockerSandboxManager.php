@@ -3,6 +3,7 @@
 namespace App\Services\Sandbox;
 
 use App\Models\Incident;
+use App\Models\Sandbox;
 use App\Services\AuditLogger;
 use App\Services\Sandbox\Contracts\SandboxManagerInterface;
 use App\Services\Sandbox\DTOs\SandboxExecutionResultDTO;
@@ -102,6 +103,19 @@ class DockerSandboxManager implements SandboxManagerInterface
             'sandbox_ecosystem' => $ecosystem,
         ]);
         $incident->save();
+
+        try {
+            Sandbox::create([
+                'incident_id' => $incident->id,
+                'sandbox_id' => $workspaceId,
+                'runtime' => $ecosystem,
+                'status' => 'initialized',
+                'repository' => $incident->repository,
+                'expires_at' => now()->addMinutes(10),
+            ]);
+        } catch (Throwable $e) {
+            Log::warning("Could not persist Sandbox model for [{$workspaceId}]: {$e->getMessage()}");
+        }
 
         AuditLogger::logSystemAction(
             event: 'sandbox.environment_provisioned',
@@ -219,6 +233,15 @@ class DockerSandboxManager implements SandboxManagerInterface
         }
 
         unset(self::$activeWorkspaces[$workspaceId]);
+
+        try {
+            Sandbox::where('sandbox_id', $workspaceId)->update([
+                'status' => 'destroyed',
+                'destroyed_at' => now(),
+            ]);
+        } catch (Throwable) {
+            // Ignore
+        }
 
         return true;
     }

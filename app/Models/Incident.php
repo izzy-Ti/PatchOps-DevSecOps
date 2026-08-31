@@ -308,4 +308,14 @@ class Incident extends Model
     {
         return $this->hasMany(IncidentEvidence::class)->where('stage', 'reproduction')->orderBy('created_at', 'desc');
     }
+
+    /**
+     * Get the sandboxes provisioned for this incident.
+     *
+     * @return HasMany<Sandbox, $this>
+     */
+    public function sandboxes(): HasMany
+    {
+        return $this->hasMany(Sandbox::class)->orderBy('created_at', 'desc');
+    }
 }
