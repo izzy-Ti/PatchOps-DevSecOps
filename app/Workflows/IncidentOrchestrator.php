@@ -56,6 +56,7 @@ class IncidentOrchestrator
                 IncidentStatus::AWAITING_APPROVAL,
                 IncidentStatus::TRIAGING,
                 IncidentStatus::REPRODUCING,
+                IncidentStatus::TRIAGED_NOT_REPRODUCIBLE,
                 IncidentStatus::PATCHING,
                 IncidentStatus::PR_CREATED,
                 IncidentStatus::CI_RUNNING,

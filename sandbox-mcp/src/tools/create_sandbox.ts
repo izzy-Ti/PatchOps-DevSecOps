@@ -1,10 +1,7 @@
-import Docker from 'dockerode';
-import { SANDBOX_LIMITS, RUNTIME_IMAGES } from '../security/limits.js';
-import { assertNoDockerSocketMount, assertNoPrivilegedEscape } from '../security/socket_guard.js';
+import { ContainerFactory } from '../docker/ContainerFactory.js';
+import { RUNTIME_IMAGES, SANDBOX_LIMITS } from '../security/limits.js';
 import { sandboxRegistry } from '../services/SandboxRegistry.js';
 import { SandboxState } from '../types/lifecycle.js';
-
-const docker = new Docker();
 
 export interface CreateSandboxInput {
   incident_id: string;
@@ -33,32 +30,7 @@ export interface CreateSandboxOutput {
 export async function createSandbox(input: CreateSandboxInput): Promise<CreateSandboxOutput> {
   const runtimeKey = input.runtime || 'node20';
   const imageName = RUNTIME_IMAGES[runtimeKey] || 'node:20-alpine';
-
-  // 1. Docker Socket & Anti-Escape Guard
   const binds = input.binds || [];
-  assertNoDockerSocketMount(binds);
-
-  const hostConfig: Docker.HostConfig = {
-    NanoCpus: SANDBOX_LIMITS.NanoCpus,
-    Memory: SANDBOX_LIMITS.MEMORY_BYTES,
-    MemorySwap: SANDBOX_LIMITS.MEMORY_SWAP_BYTES,
-    PidsLimit: SANDBOX_LIMITS.MAX_PIDS,
-    StorageOpt: {
-      size: SANDBOX_LIMITS.DISK_QUOTA_STR,
-    },
-    NetworkMode: 'none',
-    Privileged: false,
-    CapDrop: ['ALL'],
-    SecurityOpt: ['no-new-privileges:true'],
-    ReadonlyRootfs: false,
-    Tmpfs: {
-      '/tmp': 'rw,noexec,nosuid,size=512m',
-    },
-    Binds: binds,
-    AutoRemove: false,
-  };
-
-  assertNoPrivilegedEscape(hostConfig);
 
   const envArray = Object.entries(input.environment_vars || {}).map(
     ([k, v]) => `${k}=${v}`
@@ -67,14 +39,14 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
   let containerId: string | undefined;
 
   try {
-    const container = await docker.createContainer({
+    const container = await ContainerFactory.createContainer({
       Image: imageName,
       Cmd: ['tail', '-f', '/dev/null'],
       WorkingDir: SANDBOX_LIMITS.WORKSPACE_PATH,
-      User: `${SANDBOX_LIMITS.UNPRIVILEGED_UID}:${SANDBOX_LIMITS.UNPRIVILEGED_UID}`,
       Env: envArray,
-      NetworkDisabled: true, // Complete air-gapped network disablement
-      HostConfig: hostConfig,
+      HostConfig: {
+        Binds: binds,
+      },
       Labels: {
         'patchops.sandbox': 'true',
         'patchops.incident_id': input.incident_id,
@@ -85,6 +57,9 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
     await container.start();
     containerId = container.id;
   } catch (err: any) {
+    if (err.message && err.message.includes('SECURITY POLICY VIOLATION')) {
+      throw err;
+    }
     // Fallback for mocked or offline daemon environments
     containerId = `mock-cid-${Date.now().toString(36)}`;
   }
@@ -110,7 +85,7 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
       pids: SANDBOX_LIMITS.MAX_PIDS,
       network: 'none',
       user: `${SANDBOX_LIMITS.UNPRIVILEGED_UID}:${SANDBOX_LIMITS.UNPRIVILEGED_UID}`,
-      security: ['no-new-privileges', 'cap-drop-all', 'socket-locked', 'storage-capped'],
+      security: ['no-new-privileges', 'cap-drop-all', 'socket-locked', 'storage-capped', 'readonly-rootfs'],
     },
   };
 }
