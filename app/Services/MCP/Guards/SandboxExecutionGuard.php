@@ -33,7 +33,7 @@ class SandboxExecutionGuard
             $this->policy->assertSafePaths($arguments, $incident);
         }
 
-        // 3. If executing inside sandbox, inspect command payload for breakout attempts
+        // 3. If executing inside sandbox, inspect command payload for breakout attempts and command injection
         if ($toolName === 'sandbox.execute' && ! empty($arguments['command'])) {
             $command = (string) $arguments['command'];
             $forbiddenCommandPatterns = config('sandbox_permissions.forbidden_command_patterns', [
@@ -43,6 +43,11 @@ class SandboxExecutionGuard
                 '/\bmount\b/i',
                 '/\bumount\b/i',
                 '/\/var\/run\/docker\.sock/i',
+                '/(&&|\|\||;|\||`|\$\(|\$\{)/',
+                '/\b(curl|wget|nc|netcat)\b/i',
+                '/\b(chmod|chown)\b/i',
+                '/rm\s+-rf\s+\//i',
+                '/\b(sh|bash)\s+-c\b/i',
             ]);
 
             foreach ($forbiddenCommandPatterns as $pattern) {

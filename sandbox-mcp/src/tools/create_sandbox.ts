@@ -8,7 +8,7 @@ const docker = new Docker();
 
 export interface CreateSandboxInput {
   incident_id: string;
-  runtime?: 'node20' | 'python3' | 'php83' | 'node' | 'python' | 'php';
+  runtime?: 'node20' | 'python3' | 'php83' | 'node' | 'python' | 'php' | 'go';
   environment_vars?: Record<string, string>;
   binds?: string[];
 }
@@ -22,6 +22,8 @@ export interface CreateSandboxOutput {
   limits: {
     cpu: string;
     memory: string;
+    disk: string;
+    pids: number;
     network: string;
     user: string;
     security: string[];
@@ -37,10 +39,13 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
   assertNoDockerSocketMount(binds);
 
   const hostConfig: Docker.HostConfig = {
-    NanoCpus: SANDBOX_LIMITS.nanoCpus,
-    Memory: SANDBOX_LIMITS.memoryBytes,
-    MemorySwap: SANDBOX_LIMITS.memorySwapBytes,
-    PidsLimit: SANDBOX_LIMITS.pidsLimit,
+    NanoCpus: SANDBOX_LIMITS.NanoCpus,
+    Memory: SANDBOX_LIMITS.MEMORY_BYTES,
+    MemorySwap: SANDBOX_LIMITS.MEMORY_SWAP_BYTES,
+    PidsLimit: SANDBOX_LIMITS.MAX_PIDS,
+    StorageOpt: {
+      size: SANDBOX_LIMITS.DISK_QUOTA_STR,
+    },
     NetworkMode: 'none',
     Privileged: false,
     CapDrop: ['ALL'],
@@ -65,8 +70,8 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
     const container = await docker.createContainer({
       Image: imageName,
       Cmd: ['tail', '-f', '/dev/null'],
-      WorkingDir: SANDBOX_LIMITS.workspacePath,
-      User: `${SANDBOX_LIMITS.unprivilegedUid}:${SANDBOX_LIMITS.unprivilegedUid}`,
+      WorkingDir: SANDBOX_LIMITS.WORKSPACE_PATH,
+      User: `${SANDBOX_LIMITS.UNPRIVILEGED_UID}:${SANDBOX_LIMITS.UNPRIVILEGED_UID}`,
       Env: envArray,
       NetworkDisabled: true, // Complete air-gapped network disablement
       HostConfig: hostConfig,
@@ -99,11 +104,13 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
     state: instance.state,
     created_at: new Date(instance.createdAt).toISOString(),
     limits: {
-      cpu: '2.0 vCPU',
+      cpu: `${SANDBOX_LIMITS.CPU_CORES} vCPU`,
       memory: '2GB',
+      disk: SANDBOX_LIMITS.DISK_QUOTA_STR,
+      pids: SANDBOX_LIMITS.MAX_PIDS,
       network: 'none',
-      user: '1000:1000',
-      security: ['no-new-privileges', 'cap-drop-all', 'socket-locked'],
+      user: `${SANDBOX_LIMITS.UNPRIVILEGED_UID}:${SANDBOX_LIMITS.UNPRIVILEGED_UID}`,
+      security: ['no-new-privileges', 'cap-drop-all', 'socket-locked', 'storage-capped'],
     },
   };
 }

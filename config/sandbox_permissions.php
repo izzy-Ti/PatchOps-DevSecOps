@@ -53,8 +53,13 @@ return [
         '/\/var\/run\/docker\.sock/i',
         '/\/proc\/sys/i',
         '/\/sys\/kernel/i',
-        '/\b(nc|ncat|netcat)\s+.*-e\b/i',
+        '/\b(nc|ncat|netcat)\b/i',
+        '/\b(curl|wget)\b/i',
+        '/\b(chmod|chown)\b/i',
         '/\b(bash|sh|zsh)\s+-i\b/i',
+        '/\b(sh|bash)\s+-c\b/i',
+        '/(&&|\|\||;|\||`|\$\(|\$\{)/',
+        '/rm\s+-rf\s+\//i',
     ],
 
 ];

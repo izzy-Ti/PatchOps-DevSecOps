@@ -1,5 +1,5 @@
 import Docker from 'dockerode';
-import { validateCommand } from '../security/permissions.js';
+import { CommandValidator } from '../security/command_validator.js';
 import { SANDBOX_LIMITS } from '../security/limits.js';
 import { assertExecutionAirGap } from '../security/network_policy.js';
 import { sandboxRegistry } from '../services/SandboxRegistry.js';
@@ -24,6 +24,7 @@ export interface ExecuteCommandOutput {
   stdout: string;
   stderr: string;
   duration_ms: number;
+  timed_out?: boolean;
 }
 
 export async function executeCommand(input: ExecuteCommandInput): Promise<ExecuteCommandOutput> {
@@ -36,9 +37,10 @@ export async function executeCommand(input: ExecuteCommandInput): Promise<Execut
   // 2. Network Isolation Air-Gap Assertion
   assertExecutionAirGap('EXECUTE', 'none');
 
-  // 3. Security validation guard
-  const validation = validateCommand(input.command);
-  if (!validation.allowed) {
+  // 3. Pre-Execution Command Validation Gate
+  try {
+    CommandValidator.validate(input.command);
+  } catch (err: any) {
     sandboxRegistry.transition(input.sandbox_id, SandboxState.FAILED);
 
     return {
@@ -48,14 +50,14 @@ export async function executeCommand(input: ExecuteCommandInput): Promise<Execut
       command: input.command,
       exit_code: 126, // Command cannot execute
       stdout: '',
-      stderr: `Security Policy Violation: ${validation.reason}`,
+      stderr: `Security Policy Violation: ${err.message}`,
       duration_ms: 0,
     };
   }
 
   const timeout = Math.min(
-    input.timeout_seconds || SANDBOX_LIMITS.defaultTimeoutSec,
-    SANDBOX_LIMITS.maxTimeoutSec
+    input.timeout_seconds || SANDBOX_LIMITS.DEFAULT_TIMEOUT_SEC,
+    SANDBOX_LIMITS.MAX_TIMEOUT_SECONDS
   );
 
   const envArray = Object.entries(input.environment_vars || {}).map(
@@ -65,6 +67,7 @@ export async function executeCommand(input: ExecuteCommandInput): Promise<Execut
   let exitCode = 0;
   let stdout = '';
   let stderr = '';
+  let timedOut = false;
 
   try {
     if (instance.containerId) {
@@ -73,8 +76,8 @@ export async function executeCommand(input: ExecuteCommandInput): Promise<Execut
         Cmd: ['sh', '-c', input.command],
         AttachStdout: true,
         AttachStderr: true,
-        WorkingDir: input.working_dir || SANDBOX_LIMITS.workspacePath,
-        User: `${SANDBOX_LIMITS.unprivilegedUid}:${SANDBOX_LIMITS.unprivilegedUid}`,
+        WorkingDir: input.working_dir || SANDBOX_LIMITS.WORKSPACE_PATH,
+        User: `${SANDBOX_LIMITS.UNPRIVILEGED_UID}:${SANDBOX_LIMITS.UNPRIVILEGED_UID}`,
         Env: envArray,
       });
 
@@ -99,5 +102,6 @@ export async function executeCommand(input: ExecuteCommandInput): Promise<Execut
     stdout: stdout || 'Command executed cleanly.',
     stderr,
     duration_ms: durationMs > 0 ? durationMs : 45,
+    timed_out: timedOut,
   };
 }

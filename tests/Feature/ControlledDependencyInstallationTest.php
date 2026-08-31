@@ -46,9 +46,11 @@ test('InstallDependenciesTool parameters schema only accepts sandbox_id and opti
 
 test('MCPToolGateway executes controlled install_dependencies with automated manifest detection', function () {
     $gateway = app(MCPToolGateway::class);
-    $incident = Incident::factory()->create(['repository' => 'acme/webapp']);
-
     $sandboxId = 'sb_01KTESTAUTOINSTALL';
+    $incident = Incident::factory()->create([
+        'repository' => 'acme/webapp',
+        'metadata' => ['sandbox_workspace_id' => $sandboxId],
+    ]);
 
     $result = $gateway->invoke(
         role: AgentRole::REPRODUCTION,

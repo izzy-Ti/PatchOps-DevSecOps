@@ -78,12 +78,16 @@ class ResourcePolicy
         }
 
         // 3. Sandbox Workspace Isolation Constraint
-        if (! empty($arguments['workspace_id']) && in_array($scopeEnum, [ToolScope::SANDBOX_EXECUTE, ToolScope::SANDBOX_DESTROY], true)) {
-            $workspaceId = (string) $arguments['workspace_id'];
+        $workspaceId = (string) ($arguments['workspace_id'] ?? $arguments['sandbox_id'] ?? '');
+        if (! empty($workspaceId) && in_array($scopeEnum, [ToolScope::SANDBOX_EXECUTE, ToolScope::SANDBOX_DESTROY], true)) {
             $allowedWorkspace = $incident->metadata['sandbox_workspace_id'] ?? null;
             $allowedPrefixes = [
                 "sbx-{$incident->id}",
                 "sbx-{$incident->incident_number}",
+                "sb_{$incident->id}",
+                "sb_{$incident->incident_number}",
+                "repro-{$incident->id}",
+                "val-{$incident->id}",
                 'agent-sandbox',
             ];
 

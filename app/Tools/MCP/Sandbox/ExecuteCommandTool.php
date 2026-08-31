@@ -51,11 +51,15 @@ class ExecuteCommandTool implements ToolInterface
             'properties' => [
                 'workspace_id' => [
                     'type' => 'string',
-                    'description' => 'Target provisioned sandbox workspace ID.',
+                    'description' => 'Target provisioned sandbox workspace ID (e.g., sb_01KABC...).',
+                ],
+                'sandbox_id' => [
+                    'type' => 'string',
+                    'description' => 'Alternative alias for target sandbox workspace ID.',
                 ],
                 'command' => [
                     'type' => 'string',
-                    'description' => 'Command line string to execute in the container.',
+                    'description' => 'Whitelisted test runner or reproduction command string (e.g. npm test, phpunit, pytest, go test).',
                 ],
                 'timeout_seconds' => [
                     'type' => 'integer',
@@ -63,7 +67,7 @@ class ExecuteCommandTool implements ToolInterface
                     'default' => 600,
                 ],
             ],
-            'required' => ['workspace_id', 'command'],
+            'required' => ['command'],
         ];
     }
 
@@ -74,8 +78,8 @@ class ExecuteCommandTool implements ToolInterface
 
     public function execute(array $arguments, Incident $context): array
     {
-        $workspaceId = $arguments['workspace_id'];
-        $command = $arguments['command'];
+        $workspaceId = (string) ($arguments['workspace_id'] ?? $arguments['sandbox_id'] ?? '');
+        $command = (string) $arguments['command'];
         $timeout = isset($arguments['timeout_seconds']) ? (int) $arguments['timeout_seconds'] : (isset($arguments['timeout']) ? (int) $arguments['timeout'] : null);
 
         $resultDto = $this->sandboxManager->execute($workspaceId, $command, $timeout);
