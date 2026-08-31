@@ -4,7 +4,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Model Context Protocol (MCP) & GitHub Gateway Configuration
+    | Model Context Protocol (MCP) & Sandbox Gateway Configuration
     |--------------------------------------------------------------------------
     |
     | Centralized settings for official MCP servers, JSON-RPC transports,
@@ -22,6 +22,14 @@ return [
             'transport' => env('MCP_GITHUB_TRANSPORT', 'stdio'),
             'timeout' => (int) env('MCP_GITHUB_TIMEOUT', 30),
             'max_file_size_bytes' => (int) env('MCP_MAX_FILE_BYTES', 50000),
+        ],
+
+        'sandbox' => [
+            'enabled' => (bool) env('MCP_SANDBOX_ENABLED', true),
+            'command' => env('MCP_SANDBOX_COMMAND', 'node sandbox-mcp/dist/server.js'),
+            'transport' => env('MCP_SANDBOX_TRANSPORT', 'stdio'),
+            'timeout' => (int) env('MCP_SANDBOX_TIMEOUT', 600),
+            'socket_path' => env('DOCKER_SOCKET_PATH', '/var/run/docker.sock'),
         ],
     ],
 

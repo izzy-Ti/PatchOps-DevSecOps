@@ -8,9 +8,12 @@ use App\Tools\MCP\Repository\InspectDependenciesTool;
 use App\Tools\MCP\Repository\InspectStructureTool;
 use App\Tools\MCP\Repository\ReadFileTool;
 use App\Tools\MCP\Repository\SearchCodeTool;
+use App\Tools\MCP\Sandbox\CloneRepositoryTool;
+use App\Tools\MCP\Sandbox\CollectLogsTool;
 use App\Tools\MCP\Sandbox\CreateEnvironmentTool;
 use App\Tools\MCP\Sandbox\DestroyEnvironmentTool;
 use App\Tools\MCP\Sandbox\ExecuteCommandTool;
+use App\Tools\MCP\Sandbox\InstallDependenciesTool;
 use App\Tools\MCP\Vulnerability\GetAdvisoryTool;
 use App\Tools\MCP\Vulnerability\GetCveTool;
 use App\Tools\MCP\Vulnerability\SearchVulnerabilityTool;
@@ -41,7 +44,10 @@ return [
         SearchCodeTool::class,
         InspectDependenciesTool::class,
         CreateEnvironmentTool::class,
+        CloneRepositoryTool::class,
+        InstallDependenciesTool::class,
         ExecuteCommandTool::class,
+        CollectLogsTool::class,
         DestroyEnvironmentTool::class,
     ],
 

@@ -1,0 +1,32 @@
+{
+  "name": "patchops-sandbox-mcp",
+  "version": "1.0.0",
+  "description": "Dedicated Disposable Containerized Sandbox Model Context Protocol (MCP) Server for PatchOps DevSecOps",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "sandbox",
+    "docker",
+    "security",
+    "patchops"
+  ],
+  "author": "PatchOps DevSecOps Team",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.5.0",
+    "dockerode": "^4.0.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.34",
+    "@types/node": "^20.12.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
