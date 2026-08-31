@@ -2,80 +2,115 @@
 
 namespace App\DTOs;
 
-readonly class ReproductionResultDTO
+use JsonSerializable;
+
+readonly class ReproductionResultDTO implements JsonSerializable
 {
     /**
-     * Create a new reproduction result DTO instance.
-     *
-     * @param  array<string, mixed>  $artifacts
+     * @param  array<string, mixed>  $environment
+     * @param  array<int, mixed>  $artifacts
+     * @param  array<int, string>  $observations
      */
     public function __construct(
         public bool $reproduced,
-        public bool $sandboxSuccess,
-        public ?string $pocScript = null,
-        public ?string $stdout = null,
-        public ?string $stderr = null,
-        public ?int $exitCode = null,
-        public ?string $summary = null,
-        public ?string $failureReason = null,
+        public int $exitCode,
+        public string $command,
+        public string $stdout,
+        public string $stderr,
+        public float $durationMs,
+        public array $environment = [],
         public array $artifacts = [],
-        public float $executionTimeSeconds = 0.0,
+        public array $observations = [],
     ) {}
 
     /**
-     * Create a successful reproduction result DTO.
-     *
-     * @param  array<string, mixed>  $artifacts
+     * @param  array<string, mixed>  $data
      */
-    public static function success(
-        string $pocScript,
-        string $stdout,
-        string $stderr,
-        string $summary,
-        array $artifacts = [],
-        float $time = 0.0,
-    ): self {
-        return new self(
-            reproduced: true,
-            sandboxSuccess: true,
-            pocScript: $pocScript,
-            stdout: $stdout,
-            stderr: $stderr,
-            exitCode: 0,
-            summary: $summary,
-            artifacts: $artifacts,
-            executionTimeSeconds: $time,
-        );
-    }
-
-    /**
-     * Create a failed reproduction result DTO (sandbox ran cleanly, but vulnerability was not reproduced).
-     */
-    public static function failed(
-        string $reason,
-        ?string $stdout = null,
-        ?string $stderr = null,
-        ?int $exitCode = null,
-    ): self {
-        return new self(
-            reproduced: false,
-            sandboxSuccess: true,
-            stdout: $stdout,
-            stderr: $stderr,
-            exitCode: $exitCode,
-            failureReason: $reason,
-        );
-    }
-
-    /**
-     * Create an infrastructure or execution error reproduction result DTO.
-     */
-    public static function error(string $errorMessage): self
+    public static function fromArray(array $data): self
     {
         return new self(
-            reproduced: false,
-            sandboxSuccess: false,
-            failureReason: $errorMessage,
+            reproduced: (bool) ($data['reproduced'] ?? false),
+            exitCode: (int) ($data['exit_code'] ?? 0),
+            command: (string) ($data['command'] ?? ''),
+            stdout: (string) ($data['stdout'] ?? ''),
+            stderr: (string) ($data['stderr'] ?? ''),
+            durationMs: (float) ($data['duration_ms'] ?? 0.0),
+            environment: (array) ($data['environment'] ?? []),
+            artifacts: (array) ($data['artifacts'] ?? []),
+            observations: (array) ($data['observations'] ?? []),
         );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return [
+            'reproduced' => $this->reproduced,
+            'exit_code' => $this->exitCode,
+            'command' => $this->command,
+            'stdout' => $this->stdout,
+            'stderr' => $this->stderr,
+            'duration_ms' => $this->durationMs,
+            'environment' => $this->environment,
+            'artifacts' => $this->artifacts,
+            'observations' => $this->observations,
+        ];
+    }
+
+    public function jsonSerialize(): array
+    {
+        return $this->toArray();
+    }
+
+    /**
+     * Helper: check if exploit verification succeeded.
+     */
+    public function isReproduced(): bool
+    {
+        return $this->reproduced;
+    }
+
+    /**
+     * Helper: Extract vulnerable file and line call sites from observations or artifacts.
+     *
+     * @return array<int, string>
+     */
+    public function getVulnerableCallSites(): array
+    {
+        $callSites = [];
+
+        foreach ($this->observations as $obs) {
+            if (preg_match('/(?:in|at)\s+([a-zA-Z0-9_\-\/\.]+\.[a-zA-Z0-9]+(?::\d+)?)/i', $obs, $matches)) {
+                $callSites[] = $matches[1];
+            }
+        }
+
+        foreach ($this->artifacts as $artifact) {
+            if (is_array($artifact) && isset($artifact['call_site'])) {
+                $callSites[] = (string) $artifact['call_site'];
+            }
+        }
+
+        return array_unique($callSites);
+    }
+
+    /**
+     * Helper: Extract PoC script or test file path if present.
+     */
+    public function getPoCScript(): ?string
+    {
+        foreach ($this->artifacts as $artifact) {
+            if (is_array($artifact) && ($artifact['type'] ?? null) === 'poc_script' && ! empty($artifact['path'])) {
+                return (string) $artifact['path'];
+            }
+        }
+
+        if (preg_match('/(?:node|python|php)\s+([^\s]+\.(?:js|py|php|ts))/i', $this->command, $matches)) {
+            return $matches[1];
+        }
+
+        return null;
     }
 }

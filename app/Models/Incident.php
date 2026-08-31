@@ -288,4 +288,24 @@ class Incident extends Model
     {
         return $this->hasMany(ToolExecution::class)->orderBy('id', 'asc');
     }
+
+    /**
+     * Get the structured evidence records for this incident.
+     *
+     * @return HasMany<IncidentEvidence, $this>
+     */
+    public function evidences(): HasMany
+    {
+        return $this->hasMany(IncidentEvidence::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get the latest reproduction evidence for this incident.
+     *
+     * @return HasMany<IncidentEvidence, $this>
+     */
+    public function reproductionEvidence(): HasMany
+    {
+        return $this->hasMany(IncidentEvidence::class)->where('stage', 'reproduction')->orderBy('created_at', 'desc');
+    }
 }

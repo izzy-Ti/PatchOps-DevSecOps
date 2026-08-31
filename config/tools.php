@@ -14,6 +14,7 @@ use App\Tools\MCP\Sandbox\CreateEnvironmentTool;
 use App\Tools\MCP\Sandbox\DestroyEnvironmentTool;
 use App\Tools\MCP\Sandbox\ExecuteCommandTool;
 use App\Tools\MCP\Sandbox\InstallDependenciesTool;
+use App\Tools\MCP\Terminal\RecordReproductionResultTool;
 use App\Tools\MCP\Vulnerability\GetAdvisoryTool;
 use App\Tools\MCP\Vulnerability\GetCveTool;
 use App\Tools\MCP\Vulnerability\SearchVulnerabilityTool;
@@ -49,6 +50,7 @@ return [
         ExecuteCommandTool::class,
         CollectLogsTool::class,
         DestroyEnvironmentTool::class,
+        RecordReproductionResultTool::class,
     ],
 
     /*
