@@ -17,6 +17,7 @@ use App\Services\MCP\Guards\AgentExecutionBudgetGuard;
 use App\Services\MCP\Guards\HitlApprovalGuard;
 use App\Services\MCP\Guards\RepositoryAccessGuard;
 use App\Services\MCP\Guards\SandboxExecutionGuard;
+use App\Services\MCP\Guards\SandboxLifecycleGuard;
 use App\Services\MCP\Guards\ToolRiskLevelGuard;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\ToolNotFoundException;
@@ -33,6 +34,7 @@ class MCPToolGateway
         protected ?MCPClient $mcpClient = null,
         protected ?RepositoryAccessGuard $repositoryGuard = null,
         protected ?SandboxExecutionGuard $sandboxGuard = null,
+        protected ?SandboxLifecycleGuard $sandboxLifecycleGuard = null,
         protected ?ToolRiskLevelGuard $riskLevelGuard = null,
         protected ?HitlApprovalGuard $hitlGuard = null,
         protected ?AgentExecutionBudgetGuard $budgetGuard = null,
@@ -42,6 +44,7 @@ class MCPToolGateway
         $this->mcpClient ??= app(MCPClient::class);
         $this->repositoryGuard ??= app(RepositoryAccessGuard::class);
         $this->sandboxGuard ??= app(SandboxExecutionGuard::class);
+        $this->sandboxLifecycleGuard ??= app(SandboxLifecycleGuard::class);
         $this->riskLevelGuard ??= app(ToolRiskLevelGuard::class);
         $this->hitlGuard ??= app(HitlApprovalGuard::class);
         $this->budgetGuard ??= app(AgentExecutionBudgetGuard::class);
@@ -153,6 +156,9 @@ class MCPToolGateway
 
             // 6. Sandbox Security Boundary & Breakout Guard
             $this->sandboxGuard->validate($context, $arguments, $toolName);
+
+            // 6.5. Sandbox Lifecycle State Machine & Opaque Identifier Guard
+            $this->sandboxLifecycleGuard->validate($context, $arguments, $toolName);
 
             // 7. Multi-Tier Tool Risk Level Evaluation
             $this->riskLevelGuard->evaluate($tool, $arguments, $context);

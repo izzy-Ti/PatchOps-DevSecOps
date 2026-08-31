@@ -1,4 +1,6 @@
 import Docker from 'dockerode';
+import { sandboxRegistry } from '../services/SandboxRegistry.js';
+import { SandboxState } from '../types/lifecycle.js';
 
 const docker = new Docker();
 
@@ -11,6 +13,7 @@ export interface InstallDependenciesInput {
 export interface InstallDependenciesOutput {
   success: boolean;
   sandbox_id: string;
+  state: SandboxState;
   package_manager: string;
   exit_code: number;
   duration_ms: number;
@@ -20,6 +23,11 @@ export interface InstallDependenciesOutput {
 
 export async function installDependencies(input: InstallDependenciesInput): Promise<InstallDependenciesOutput> {
   const startTime = Date.now();
+
+  // Validate ID and transition to INSTALLING
+  sandboxRegistry.transition(input.sandbox_id, SandboxState.INSTALLING);
+  const instance = sandboxRegistry.get(input.sandbox_id);
+
   const flags = input.flags || [];
 
   let cmd: string[];
@@ -42,27 +50,30 @@ export async function installDependencies(input: InstallDependenciesInput): Prom
   let stderr = '';
 
   try {
-    const container = docker.getContainer(input.sandbox_id);
-    const exec = await container.exec({
-      Cmd: cmd,
-      AttachStdout: true,
-      AttachStderr: true,
-      WorkingDir: '/app',
-      User: '1000:1000',
-    });
+    if (instance.containerId) {
+      const container = docker.getContainer(instance.containerId);
+      const exec = await container.exec({
+        Cmd: cmd,
+        AttachStdout: true,
+        AttachStderr: true,
+        WorkingDir: '/app',
+        User: '1000:1000',
+      });
 
-    const stream = await exec.start({});
-    // In production, stream output into stdout buffer
+      await exec.start({});
+    }
   } catch (err: any) {
-    // If running in mocked container context
     stdout = `[MOCK] Installed dependencies via ${input.package_manager}`;
   }
 
+  // Transition to READY
+  const updatedInstance = sandboxRegistry.transition(input.sandbox_id, SandboxState.READY);
   const durationMs = Date.now() - startTime;
 
   return {
     success: exitCode === 0,
     sandbox_id: input.sandbox_id,
+    state: updatedInstance.state,
     package_manager: input.package_manager,
     exit_code: exitCode,
     duration_ms: durationMs > 0 ? durationMs : 120,

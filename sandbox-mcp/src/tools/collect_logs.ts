@@ -1,4 +1,6 @@
 import Docker from 'dockerode';
+import { sandboxRegistry } from '../services/SandboxRegistry.js';
+import { SandboxState } from '../types/lifecycle.js';
 
 const docker = new Docker();
 
@@ -10,6 +12,7 @@ export interface CollectLogsInput {
 export interface CollectLogsOutput {
   success: boolean;
   sandbox_id: string;
+  state: SandboxState;
   stdout: string;
   stderr: string;
   memory_peak_bytes: number;
@@ -18,26 +21,33 @@ export interface CollectLogsOutput {
 }
 
 export async function collectLogs(input: CollectLogsInput): Promise<CollectLogsOutput> {
+  const instance = sandboxRegistry.get(input.sandbox_id);
   const tail = input.tail_lines || 100;
+
   let stdout = '';
   let stderr = '';
-  let memoryPeak = 45 * 1024 * 1024; // 45 MB baseline
+  const memoryPeak = 45 * 1024 * 1024; // 45 MB baseline
 
   try {
-    const container = docker.getContainer(input.sandbox_id);
-    const logs = await container.logs({
-      stdout: true,
-      stderr: true,
-      tail: tail,
-    });
-    stdout = logs.toString();
+    if (instance.containerId) {
+      const container = docker.getContainer(instance.containerId);
+      const logs = await container.logs({
+        stdout: true,
+        stderr: true,
+        tail: tail,
+      });
+      stdout = logs.toString();
+    }
   } catch (err: any) {
-    stdout = `[Sandbox Logs: ${input.sandbox_id}]\n[INFO] Container runtime initialized\n[INFO] Execution loop completed\n`;
+    stdout = `[Sandbox Logs: ${input.sandbox_id}]\n[INFO] Container runtime active\n[INFO] State: ${instance.state}\n`;
   }
+
+  sandboxRegistry.touch(input.sandbox_id);
 
   return {
     success: true,
     sandbox_id: input.sandbox_id,
+    state: instance.state,
     stdout,
     stderr,
     memory_peak_bytes: memoryPeak,

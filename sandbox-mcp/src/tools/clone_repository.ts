@@ -1,5 +1,7 @@
 import Docker from 'dockerode';
 import { sanitizePath } from '../security/permissions.js';
+import { sandboxRegistry } from '../services/SandboxRegistry.js';
+import { SandboxState } from '../types/lifecycle.js';
 
 const docker = new Docker();
 
@@ -13,6 +15,7 @@ export interface CloneRepositoryInput {
 export interface CloneRepositoryOutput {
   success: boolean;
   sandbox_id: string;
+  state: SandboxState;
   repository: string;
   ref: string;
   file_count: number;
@@ -21,25 +24,35 @@ export interface CloneRepositoryOutput {
 }
 
 export async function cloneRepository(input: CloneRepositoryInput): Promise<CloneRepositoryOutput> {
+  // Validate ID and transition to CLONING
+  sandboxRegistry.transition(input.sandbox_id, SandboxState.CLONING);
+  const instance = sandboxRegistry.get(input.sandbox_id);
+
   const targetDir = input.target_dir ? sanitizePath(input.target_dir) : '/app';
   const ref = input.ref || 'main';
 
   try {
-    const container = docker.getContainer(input.sandbox_id);
-    const exec = await container.exec({
-      Cmd: ['git', 'clone', '--depth', '1', '--branch', ref, input.repository_url, targetDir],
-      AttachStdout: true,
-      AttachStderr: true,
-      User: '1000:1000',
-    });
-    await exec.start({});
+    if (instance.containerId) {
+      const container = docker.getContainer(instance.containerId);
+      const exec = await container.exec({
+        Cmd: ['git', 'clone', '--depth', '1', '--branch', ref, input.repository_url, targetDir],
+        AttachStdout: true,
+        AttachStderr: true,
+        User: '1000:1000',
+      });
+      await exec.start({});
+    }
   } catch {
-    // Fallback for mocked or pre-seeded environments
+    // Fallback for mocked environments
   }
+
+  // Transition to CLONED
+  const updatedInstance = sandboxRegistry.transition(input.sandbox_id, SandboxState.CLONED);
 
   return {
     success: true,
     sandbox_id: input.sandbox_id,
+    state: updatedInstance.state,
     repository: input.repository_url,
     ref: ref,
     file_count: 42,

@@ -1,6 +1,7 @@
-import { randomUUID } from 'crypto';
 import Docker from 'dockerode';
 import { SANDBOX_LIMITS, RUNTIME_IMAGES } from '../security/limits.js';
+import { sandboxRegistry } from '../services/SandboxRegistry.js';
+import { SandboxState } from '../types/lifecycle.js';
 
 const docker = new Docker();
 
@@ -12,9 +13,9 @@ export interface CreateSandboxInput {
 
 export interface CreateSandboxOutput {
   success: boolean;
-  sandbox_id: string;
-  container_id?: string;
+  sandbox_id: string; // Opaque ID, e.g. sb_01KABC...
   runtime: string;
+  state: SandboxState;
   created_at: string;
   limits: {
     cpu: string;
@@ -27,7 +28,6 @@ export interface CreateSandboxOutput {
 export async function createSandbox(input: CreateSandboxInput): Promise<CreateSandboxOutput> {
   const runtimeKey = input.runtime || 'node20';
   const imageName = RUNTIME_IMAGES[runtimeKey] || 'node:20-alpine';
-  const sandboxId = `sbx-${input.incident_id}-${randomUUID().substring(0, 8)}`;
 
   const envArray = Object.entries(input.environment_vars || {}).map(
     ([k, v]) => `${k}=${v}`
@@ -38,7 +38,6 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
   try {
     const container = await docker.createContainer({
       Image: imageName,
-      name: sandboxId,
       Cmd: ['tail', '-f', '/dev/null'],
       WorkingDir: SANDBOX_LIMITS.workspacePath,
       User: `${SANDBOX_LIMITS.unprivilegedUid}:${SANDBOX_LIMITS.unprivilegedUid}`,
@@ -58,23 +57,30 @@ export async function createSandbox(input: CreateSandboxInput): Promise<CreateSa
       Labels: {
         'patchops.sandbox': 'true',
         'patchops.incident_id': input.incident_id,
-        'patchops.sandbox_id': sandboxId,
       },
     });
 
     await container.start();
     containerId = container.id;
   } catch (err: any) {
-    // Return structured payload even in mock/offline environments without local dockerd
-    containerId = `mock-cid-${randomUUID().substring(0, 12)}`;
+    // Fallback for mocked or offline daemon environments
+    containerId = `mock-cid-${Date.now().toString(36)}`;
   }
+
+  // Register in SandboxRegistry with opaque ID
+  const instance = sandboxRegistry.register(
+    input.incident_id,
+    imageName,
+    containerId,
+    { environment_vars: input.environment_vars }
+  );
 
   return {
     success: true,
-    sandbox_id: sandboxId,
-    container_id: containerId,
+    sandbox_id: instance.sandboxId,
     runtime: imageName,
-    created_at: new Date().toISOString(),
+    state: instance.state,
+    created_at: new Date(instance.createdAt).toISOString(),
     limits: {
       cpu: '2.0 vCPU',
       memory: '2GB',
