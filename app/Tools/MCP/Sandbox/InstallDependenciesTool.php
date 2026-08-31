@@ -3,6 +3,7 @@
 namespace App\Tools\MCP\Sandbox;
 
 use App\Models\Incident;
+use App\Services\Sandbox\DTOs\DependencyInstallResultDTO;
 use App\Tools\Contracts\ToolInterface;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Enums\RiskLevel;
@@ -40,7 +41,7 @@ class InstallDependenciesTool implements ToolInterface
 
     public function description(): string
     {
-        return 'Execute bounded package dependency installation inside the container workspace.';
+        return 'Automatically detect repository manifest (package.json, composer.json, requirements.txt, go.mod) and execute safe, whitelisted, bounded dependency installation.';
     }
 
     public function parametersSchema(): array
@@ -50,20 +51,14 @@ class InstallDependenciesTool implements ToolInterface
             'properties' => [
                 'sandbox_id' => [
                     'type' => 'string',
-                    'description' => 'Target sandbox container ID.',
+                    'description' => 'Opaque sandbox identifier (e.g., sb_01KABC...).',
                 ],
-                'package_manager' => [
+                'manifest_path' => [
                     'type' => 'string',
-                    'enum' => ['npm', 'composer', 'pip', 'yarn', 'pnpm'],
-                    'description' => 'Ecosystem package manager to invoke.',
-                ],
-                'flags' => [
-                    'type' => 'array',
-                    'items' => ['type' => 'string'],
-                    'description' => 'Optional CLI flags for dependency installation.',
+                    'description' => 'Optional relative path to the manifest directory (defaults to /app).',
                 ],
             ],
-            'required' => ['sandbox_id', 'package_manager'],
+            'required' => ['sandbox_id'],
         ];
     }
 
@@ -75,9 +70,10 @@ class InstallDependenciesTool implements ToolInterface
     public function execute(array $arguments, Incident $context): array
     {
         $sandboxId = (string) $arguments['sandbox_id'];
-        $pm = (string) $arguments['package_manager'];
-        $flags = (array) ($arguments['flags'] ?? []);
+        $manifestPath = isset($arguments['manifest_path']) ? (string) $arguments['manifest_path'] : null;
 
-        return $this->client->installDependencies($sandboxId, $pm, $flags);
+        $rawResult = $this->client->installDependencies($sandboxId, $manifestPath);
+
+        return DependencyInstallResultDTO::fromArray($rawResult)->toArray();
     }
 }

@@ -83,26 +83,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'sandbox.install_dependencies',
-        description: 'Execute bounded package dependency installation inside the container workspace.',
+        description: 'Automatically detect repository manifest (package.json, composer.json, requirements.txt, go.mod) and execute safe, whitelisted, bounded dependency installation.',
         inputSchema: {
           type: 'object',
           properties: {
             sandbox_id: {
               type: 'string',
-              description: 'Target sandbox container ID.',
+              description: 'Opaque sandbox identifier (e.g., sb_01KABC...).',
             },
-            package_manager: {
+            manifest_path: {
               type: 'string',
-              enum: ['npm', 'composer', 'pip', 'yarn', 'pnpm'],
-              description: 'Ecosystem package manager to invoke.',
-            },
-            flags: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Optional CLI flags for dependency installation.',
+              description: 'Optional relative path to the manifest directory (defaults to /app).',
             },
           },
-          required: ['sandbox_id', 'package_manager'],
+          required: ['sandbox_id'],
         },
       },
       {

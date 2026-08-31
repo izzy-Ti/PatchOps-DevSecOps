@@ -44,18 +44,18 @@ class SandboxMcpClient
     }
 
     /**
-     * Install dependencies inside isolated workspace.
+     * Install dependencies inside isolated workspace using automated manifest detection.
      *
-     * @param  array<int, string>  $flags
      * @return array<string, mixed>
      */
-    public function installDependencies(string $sandboxId, string $packageManager = 'npm', array $flags = []): array
+    public function installDependencies(string $sandboxId, ?string $manifestPath = null): array
     {
-        return $this->call('sandbox.install_dependencies', [
-            'sandbox_id' => $sandboxId,
-            'package_manager' => $packageManager,
-            'flags' => $flags,
-        ]);
+        $args = ['sandbox_id' => $sandboxId];
+        if ($manifestPath !== null) {
+            $args['manifest_path'] = $manifestPath;
+        }
+
+        return $this->call('sandbox.install_dependencies', $args);
     }
 
     /**

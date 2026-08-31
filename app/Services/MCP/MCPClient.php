@@ -160,6 +160,15 @@ class MCPClient
             );
         }
 
-        return $toolResult['result'] ?? [];
+        $result = $toolResult['result'] ?? [];
+
+        if (isset($result['content'][0]['text']) && is_string($result['content'][0]['text'])) {
+            $parsedContent = json_decode($result['content'][0]['text'], true);
+            if (is_array($parsedContent)) {
+                return $parsedContent;
+            }
+        }
+
+        return $result;
     }
 }

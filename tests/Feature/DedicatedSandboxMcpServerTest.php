@@ -22,8 +22,8 @@ test('SandboxMcpClient dispatches container lifecycle tools cleanly', function (
     $cloneRes = $client->cloneRepository($sandboxId, 'acme/webapp', 'main');
     expect($cloneRes['success'])->toBeTrue();
 
-    // 3. Install dependencies
-    $installRes = $client->installDependencies($sandboxId, 'npm', ['--silent']);
+    // 3. Install dependencies via automated manifest detection
+    $installRes = $client->installDependencies($sandboxId);
     expect($installRes['success'])->toBeTrue();
 
     // 4. Execute command
@@ -73,13 +73,12 @@ test('MCPToolGateway executes dedicated sandbox tools for Reproduction and Valid
 
     expect($cloneResult['success'])->toBeTrue();
 
-    // 3. Install dependencies via sandbox.install_dependencies
+    // 3. Install dependencies via sandbox.install_dependencies (automatic manifest detection)
     $installResult = $gateway->invoke(
         role: AgentRole::REPRODUCTION,
         toolName: 'sandbox.install_dependencies',
         arguments: [
             'sandbox_id' => $sandboxId,
-            'package_manager' => 'npm',
         ],
         context: $incident,
     );

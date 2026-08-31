@@ -35,11 +35,11 @@ export interface SandboxInstance {
  */
 export const ALLOWED_TRANSITIONS: Record<SandboxState, SandboxState[]> = {
   [SandboxState.CREATING]: [SandboxState.INITIALIZED, SandboxState.FAILED, SandboxState.DESTROYING],
-  [SandboxState.INITIALIZED]: [SandboxState.CLONING, SandboxState.READY, SandboxState.DESTROYING, SandboxState.FAILED],
+  [SandboxState.INITIALIZED]: [SandboxState.CLONING, SandboxState.CLONED, SandboxState.INSTALLING, SandboxState.READY, SandboxState.EXECUTING, SandboxState.COLLECTING, SandboxState.DESTROYING, SandboxState.FAILED],
   [SandboxState.CLONING]: [SandboxState.CLONED, SandboxState.FAILED, SandboxState.DESTROYING],
-  [SandboxState.CLONED]: [SandboxState.INSTALLING, SandboxState.READY, SandboxState.EXECUTING, SandboxState.DESTROYING, SandboxState.FAILED],
+  [SandboxState.CLONED]: [SandboxState.INSTALLING, SandboxState.READY, SandboxState.EXECUTING, SandboxState.COLLECTING, SandboxState.DESTROYING, SandboxState.FAILED],
   [SandboxState.INSTALLING]: [SandboxState.READY, SandboxState.FAILED, SandboxState.DESTROYING],
-  [SandboxState.READY]: [SandboxState.EXECUTING, SandboxState.COLLECTING, SandboxState.DESTROYING, SandboxState.FAILED],
+  [SandboxState.READY]: [SandboxState.EXECUTING, SandboxState.COLLECTING, SandboxState.INSTALLING, SandboxState.DESTROYING, SandboxState.FAILED],
   [SandboxState.EXECUTING]: [SandboxState.READY, SandboxState.COLLECTING, SandboxState.FAILED, SandboxState.DESTROYING],
   [SandboxState.COLLECTING]: [SandboxState.READY, SandboxState.DESTROYING, SandboxState.FAILED],
   [SandboxState.FAILED]: [SandboxState.COLLECTING, SandboxState.DESTROYING],

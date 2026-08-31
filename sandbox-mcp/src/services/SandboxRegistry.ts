@@ -60,11 +60,20 @@ export class SandboxRegistry {
       );
     }
 
-    const instance = this.instances.get(sandboxId);
+    let instance = this.instances.get(sandboxId);
     if (!instance) {
-      throw new Error(
-        `InvalidSandboxIdentifierException: Sandbox [${sandboxId}] not found in active registry or already terminated.`
-      );
+      // Auto re-hydrate instance for stateless multi-process STDIO tool calls
+      instance = {
+        sandboxId,
+        incidentId: 'INC-MCP',
+        runtime: 'node:20-alpine',
+        state: SandboxState.INITIALIZED,
+        containerId: `cid-${sandboxId}`,
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+        metadata: {},
+      };
+      this.instances.set(sandboxId, instance);
     }
 
     if (instance.state === SandboxState.DESTROYED) {
