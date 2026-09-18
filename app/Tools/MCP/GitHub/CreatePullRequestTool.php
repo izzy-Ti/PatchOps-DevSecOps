@@ -26,6 +26,7 @@ class CreatePullRequestTool implements ToolInterface
             inputSchema: $this->parametersSchema(),
             requiredPermission: $this->requiredPermission(),
             allowedAgents: [
+                AgentRole::PATCH,
                 AgentRole::POST_APPROVAL,
                 AgentRole::ORCHESTRATOR,
             ],

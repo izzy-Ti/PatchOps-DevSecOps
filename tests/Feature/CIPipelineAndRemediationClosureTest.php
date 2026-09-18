@@ -7,8 +7,6 @@ use App\Jobs\MonitorCIPipelineJob;
 use App\Jobs\MonitorDeploymentJob;
 use App\Jobs\RunPostDeploymentVerificationJob;
 use App\Models\Incident;
-use App\Models\PatchArtifact;
-use App\Models\PullRequest;
 use App\Models\RemediationRun;
 use App\Models\VerificationCheck;
 use App\Services\CICD\CIPipelineService;

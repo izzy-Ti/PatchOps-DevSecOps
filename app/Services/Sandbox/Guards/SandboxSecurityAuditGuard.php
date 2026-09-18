@@ -4,6 +4,7 @@ namespace App\Services\Sandbox\Guards;
 
 use App\Exceptions\MCP\ForbiddenHostCapabilityException;
 use App\Models\Incident;
+use App\Services\Security\CommandValidationGuard;
 use Illuminate\Support\Facades\Log;
 
 class SandboxSecurityAuditGuard
@@ -110,14 +111,13 @@ class SandboxSecurityAuditGuard
 
         // 5. Command Allowlist & Injection Guard
         if (in_array($toolName, ['sandbox.execute', 'sandbox.execute_command'], true) && ! empty($arguments['command'])) {
-            app(\App\Services\Security\CommandValidationGuard::class)->validateCommand((string) $arguments['command'], $incident);
+            app(CommandValidationGuard::class)->validateCommand((string) $arguments['command'], $incident);
         }
 
         // 6. Network Egress Target Guard
         if (! empty($arguments['target_url']) || ! empty($arguments['endpoint']) || ! empty($arguments['host'])) {
             $target = (string) ($arguments['target_url'] ?? $arguments['endpoint'] ?? $arguments['host']);
-            app(\App\Services\Sandbox\Guards\SandboxNetworkEgressGuard::class)->validateTarget($target, $incident);
+            app(SandboxNetworkEgressGuard::class)->validateTarget($target, $incident);
         }
     }
 }
-

@@ -55,4 +55,9 @@ class RemediationRun extends Model
     {
         return $this->hasMany(VerificationCheck::class, 'remediation_run_id');
     }
+
+    public function checks(): HasMany
+    {
+        return $this->verificationChecks();
+    }
 }

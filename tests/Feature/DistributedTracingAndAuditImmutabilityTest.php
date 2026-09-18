@@ -82,9 +82,9 @@ test('AuditEvent model strictly forbids deletion and throws ImmutableAuditEventE
 test('SecretRedactionService masks GitHub PATs, AWS keys, Bearer tokens, private keys, and DB credentials', function () {
     $service = app(SecretRedactionService::class);
 
-    $raw = "Config: token=ghp_1234567890abcdefghijklmnopqrstuvwxyz and key=AKIAIOSFODNN7EXAMPLE "
-        ."and auth=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.t-ae7H8NWZIOg "
-        ."db=postgres://user:supersecretpass@db.internal:5432/main";
+    $raw = 'Config: token=ghp_1234567890abcdefghijklmnopqrstuvwxyz and key=AKIAIOSFODNN7EXAMPLE '
+        .'and auth=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.t-ae7H8NWZIOg '
+        .'db=postgres://user:supersecretpass@db.internal:5432/main';
 
     $redacted = $service->redactString($raw);
 
@@ -120,7 +120,6 @@ test('IncidentTimelineService projects chronological timeline of audit events, a
         'model' => 'gemini-1.5-pro',
         'created_at' => now()->subMinutes(8),
     ]);
-
 
     // 3. Verification check
     $run = RemediationRun::create([

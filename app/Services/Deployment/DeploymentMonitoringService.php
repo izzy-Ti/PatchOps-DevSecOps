@@ -28,7 +28,7 @@ class DeploymentMonitoringService
         $deployed = isset($context['deployment_success']) ? (bool) $context['deployment_success'] : true;
         $status = $deployed ? 'SUCCEEDED' : 'FAILED';
         $durationMs = (int) round((microtime(true) - $startTime) * 1000);
-        $logs = (string) ($context['deployment_logs'] ?? ($deployed ? "Container image rolled out to {$environment} successfully. All replicas healthy." : "Deployment failed: Pod crash loop backoff."));
+        $logs = (string) ($context['deployment_logs'] ?? ($deployed ? "Container image rolled out to {$environment} successfully. All replicas healthy." : 'Deployment failed: Pod crash loop backoff.'));
 
         $run->update([
             'deployment_id' => $deploymentId,

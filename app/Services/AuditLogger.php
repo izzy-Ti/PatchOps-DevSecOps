@@ -2,9 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\AuditEvent;
 use App\Models\AuditLog;
+use App\Models\Incident;
 use App\Models\User;
+use App\Services\Security\SecretRedactionService;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class AuditLogger
@@ -130,7 +134,7 @@ class AuditLogger
     ): void {
         try {
             $incidentId = null;
-            if ($auditable instanceof \App\Models\Incident) {
+            if ($auditable instanceof Incident) {
                 $incidentId = $auditable->id;
             } elseif (isset($payload['incident_id'])) {
                 $incidentId = $payload['incident_id'];
@@ -139,8 +143,8 @@ class AuditLogger
             }
 
             if ($incidentId) {
-                $redactor = app(\App\Services\Security\SecretRedactionService::class);
-                \App\Models\AuditEvent::create([
+                $redactor = app(SecretRedactionService::class);
+                AuditEvent::create([
                     'incident_id' => $incidentId,
                     'actor_type' => $actorType,
                     'actor_id' => $actorId,
@@ -152,8 +156,7 @@ class AuditLogger
                 ]);
             }
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning("Could not persist to audit_events: {$e->getMessage()}");
+            Log::warning("Could not persist to audit_events: {$e->getMessage()}");
         }
     }
 }
-

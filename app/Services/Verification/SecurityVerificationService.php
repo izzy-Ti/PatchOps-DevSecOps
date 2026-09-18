@@ -30,7 +30,6 @@ class SecurityVerificationService
         $statusCode = isset($context['security_status_code']) ? (int) $context['security_status_code'] : ($exploitBlocked ? 403 : 200);
         $passed = $exploitBlocked && ($statusCode !== 200);
 
-
         $durationMs = (int) round((microtime(true) - $startTime) * 1000);
         $evidence = [
             'target_endpoint' => $endpoint,

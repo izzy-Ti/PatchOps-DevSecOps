@@ -24,6 +24,7 @@ use App\Services\MCP\Guards\ToolPermissionGuard;
 use App\Services\MCP\Guards\ToolRiskLevelGuard;
 use App\Services\Sandbox\Guards\SandboxSecurityAuditGuard;
 use App\Services\Tracing\TraceContext;
+use App\Services\Tracing\TraceManager;
 use App\Tools\Enums\AgentRole;
 use App\Tools\Exceptions\ToolNotFoundException;
 use App\Tools\Permissions\ToolScope;
@@ -275,10 +276,10 @@ class MCPToolGateway
 
             // 13.5. Record distributed tracing tool_call telemetry
             try {
-                app(\App\Services\Tracing\TraceManager::class)->recordToolCall([
+                app(TraceManager::class)->recordToolCall([
                     'agent_run_id' => $agentRunId,
                     'incident_id' => $context->id,
-                    'trace_id' => app(\App\Services\Tracing\TraceManager::class)->currentTraceId() ?? $context->latestTrace?->id,
+                    'trace_id' => app(TraceManager::class)->currentTraceId() ?? $context->latestTrace?->id,
                     'tool_name' => $toolName,
                     'server_name' => 'mcp-gateway',
                     'permission_scope' => $permission,
@@ -289,7 +290,7 @@ class MCPToolGateway
                     'exit_code' => (int) ($rawOutput['exit_code'] ?? 0),
                     'duration_ms' => (int) $durationMs,
                 ]);
-            } catch (\Throwable $err) {
+            } catch (Throwable $err) {
                 Log::warning("TraceManager: Could not record tool_call: {$err->getMessage()}");
             }
 

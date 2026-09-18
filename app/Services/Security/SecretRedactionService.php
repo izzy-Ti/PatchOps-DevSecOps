@@ -55,9 +55,6 @@ class SecretRedactionService
 
     /**
      * Recursively redact values in an array or scalar.
-     *
-     * @param  mixed  $data
-     * @return mixed
      */
     public function redact(mixed $data): mixed
     {

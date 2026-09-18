@@ -26,11 +26,16 @@ return [
 
         'sandbox' => [
             'enabled' => (bool) env('MCP_SANDBOX_ENABLED', true),
+            'host' => env('SANDBOX_MCP_HOST', '127.0.0.1'),
+            'port' => (int) env('SANDBOX_MCP_PORT', 8088),
+            'secret' => env('SANDBOX_MCP_SECRET', ''),
+            'default_ttl_minutes' => (int) env('SANDBOX_DEFAULT_TTL_MINUTES', 30),
             'command' => env('MCP_SANDBOX_COMMAND', 'node sandbox-mcp/dist/server.js'),
             'transport' => env('MCP_SANDBOX_TRANSPORT', 'stdio'),
             'timeout' => (int) env('MCP_SANDBOX_TIMEOUT', 600),
             'socket_path' => env('DOCKER_SOCKET_PATH', '/var/run/docker.sock'),
         ],
+
     ],
 
     'security' => [

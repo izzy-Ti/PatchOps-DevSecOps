@@ -60,6 +60,6 @@ class PromptInjectionGuard
             ."<![CDATA[\n"
             ."{$sanitized}\n"
             ."]]>\n"
-            ."</UNTRUSTED_CONTENT>";
+            .'</UNTRUSTED_CONTENT>';
     }
 }

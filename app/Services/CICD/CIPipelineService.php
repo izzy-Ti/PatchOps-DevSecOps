@@ -30,7 +30,7 @@ class CIPipelineService
         $failedSteps = (array) ($context['ci_failed_steps'] ?? ($passed ? [] : ['run_unit_tests']));
         $logs = (string) ($context['ci_logs'] ?? ($passed ? 'CI build and test suite succeeded with exit code 0.' : 'Process failed with exit code 1: Assertion failed.'));
         $durationMs = (int) round((microtime(true) - $startTime) * 1000);
-        $errorSummary = $passed ? null : "CI Pipeline failed on jobs: ".implode(', ', $failedJobs);
+        $errorSummary = $passed ? null : 'CI Pipeline failed on jobs: '.implode(', ', $failedJobs);
 
         // Update remediation run status
         $run->update([

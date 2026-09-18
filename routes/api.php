@@ -48,9 +48,8 @@ Route::middleware([EnsureCorrelationId::class])->group(function (): void {
         Route::post('/{incident}/patches/{patch}/reject', [IncidentApprovalController::class, 'reject'])->name('reject-patch');
     });
 
-
     // Incidents Management (Protected)
-    Route::middleware('auth:sanctum')->prefix('incidents')->name('incidents.')->group(function (): void {
+    Route::middleware('auth:sanctum')->prefix('incidents')->name('api.incidents.')->group(function (): void {
         Route::get('/', [IncidentController::class, 'index'])->name('index');
         Route::post('/', [IncidentController::class, 'store'])->name('store');
         Route::get('/{incident}', [IncidentController::class, 'show'])->name('show');

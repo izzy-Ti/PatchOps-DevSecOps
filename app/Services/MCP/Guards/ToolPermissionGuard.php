@@ -155,8 +155,8 @@ class ToolPermissionGuard
         $roleValue = $role instanceof \BackedEnum ? (string) $role->value : (string) $role;
         $enumRole = $role instanceof AgentRole ? $role : (AgentRole::tryFrom($roleValue) ?? AgentRole::TRIAGE);
 
-        // Strict role restriction: Triage cannot invoke sandbox tools under any circumstance
-        if ($roleValue === 'triage' && str_starts_with($toolName, 'sandbox.')) {
+        // Strict role restriction: Triage cannot invoke sandbox tools or GitHub mutation tools
+        if ($roleValue === 'triage' && (str_starts_with($toolName, 'sandbox.') || str_starts_with($toolName, 'github.create_'))) {
             throw new UnauthorizedToolException($enumRole, $toolName);
         }
 
@@ -167,32 +167,12 @@ class ToolPermissionGuard
             'repository.modify',
             'github.create_pull_request',
             'github.merge_pull_request',
+            'github.create_branch',
+            'github.apply_and_commit_patch',
             'github.update_issue',
         ], true)) {
             throw new UnauthorizedToolException($enumRole, $toolName);
         }
-
-        // Strict non-bypassable boundary: No autonomous agent role can mutate branches, create PRs, or access production
-        if (in_array($roleValue, ['triage', 'reproduction', 'patch', 'validation', 'reviewer'], true) && in_array($toolName, [
-            'github.create_pull_request',
-            'github.merge_pull_request',
-            'github.create_branch',
-            'github.apply_and_commit_patch',
-            'production.deploy',
-            'production.rollback',
-        ], true)) {
-            try {
-                $registryInstance = $registry ?? app(ToolRegistry::class);
-                if ($registryInstance && $registryInstance->has($toolName) && $registryInstance->authorize($toolName, $enumRole)) {
-                    return;
-                }
-            } catch (\Throwable) {
-            }
-
-            throw new UnauthorizedToolException($enumRole, $toolName);
-        }
-
-
 
         if (isset(self::PERMISSION_MATRIX[$roleValue])) {
             $allowedTools = self::PERMISSION_MATRIX[$roleValue];
@@ -203,12 +183,11 @@ class ToolPermissionGuard
 
         // Dynamic registry check
         try {
-            $registry ??= app(ToolRegistry::class);
-            if ($registry && $registry->has($toolName) && $registry->authorize($toolName, $enumRole)) {
+            $registryInstance = $registry ?? app(ToolRegistry::class);
+            if ($registryInstance && $registryInstance->has($toolName) && $registryInstance->authorize($toolName, $enumRole)) {
                 return;
             }
         } catch (\Throwable) {
-            // Ignore container resolution errors
         }
 
         throw new UnauthorizedToolException($enumRole, $toolName);

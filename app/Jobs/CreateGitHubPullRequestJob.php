@@ -2,9 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Enums\RemediationStatus;
 use App\Models\Approval;
 use App\Models\Incident;
 use App\Models\PatchArtifact;
+use App\Models\RemediationRun;
 use App\Services\AuditLogger;
 use App\Services\GitHub\GitHubPRService;
 use Illuminate\Bus\Queueable;
@@ -48,15 +50,14 @@ class CreateGitHubPullRequestJob implements ShouldQueue
             correlationId: $this->incident->correlation_id,
         );
 
-        $run = \App\Models\RemediationRun::create([
+        $run = RemediationRun::create([
             'incident_id' => $this->incident->id,
             'patch_id' => $this->patch->id,
             'pull_request_id' => $pr->id,
-            'status' => \App\Enums\RemediationStatus::PR_CREATED,
+            'status' => RemediationStatus::PR_CREATED,
             'environment' => 'staging',
         ]);
 
         MonitorCIPipelineJob::dispatch($this->incident, $run);
     }
 }
-

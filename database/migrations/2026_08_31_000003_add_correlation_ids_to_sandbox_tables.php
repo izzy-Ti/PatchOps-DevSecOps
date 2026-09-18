@@ -15,11 +15,11 @@ return new class extends Migration
             Schema::table('sandboxes', function (Blueprint $table) {
                 if (! Schema::hasColumn('sandboxes', 'agent_run_id')) {
                     $table->string('agent_run_id', 64)->nullable()->after('status');
+                    $table->index('agent_run_id', 'idx_sandboxes_agent_run');
                 }
                 if (! Schema::hasColumn('sandboxes', 'correlation_id')) {
                     $table->string('correlation_id', 64)->nullable()->after('agent_run_id');
                 }
-                $table->index('agent_run_id', 'idx_sandboxes_agent_run');
             });
         }
 

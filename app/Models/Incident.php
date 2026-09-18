@@ -343,7 +343,7 @@ class Incident extends Model
      */
     public function latestPatchArtifact(): HasOne
     {
-        return $this->hasOne(PatchArtifact::class)->latestOfMany();
+        return $this->hasOne(PatchArtifact::class)->latest('created_at');
     }
 
     /**
@@ -363,7 +363,7 @@ class Incident extends Model
      */
     public function latestQualityGateRun(): HasOne
     {
-        return $this->hasOne(QualityGateRun::class)->latestOfMany();
+        return $this->hasOne(QualityGateRun::class)->latest('created_at');
     }
 
     /**
@@ -383,7 +383,7 @@ class Incident extends Model
      */
     public function latestApproval(): HasOne
     {
-        return $this->hasOne(Approval::class)->latestOfMany();
+        return $this->hasOne(Approval::class)->latest('created_at');
     }
 
     /**
@@ -403,7 +403,7 @@ class Incident extends Model
      */
     public function latestPullRequest(): HasOne
     {
-        return $this->hasOne(PullRequest::class)->latestOfMany();
+        return $this->hasOne(PullRequest::class)->latest('created_at');
     }
 
     /**
@@ -412,6 +412,7 @@ class Incident extends Model
     public function getCveIdentifierAttribute(): string
     {
         return (string) ($this->vulnerability?->cve_id
+            ?? $this->metadata['cve_identifier']
             ?? $this->metadata['cve_id']
             ?? $this->metadata['cve']
             ?? $this->incident_number);
@@ -472,7 +473,7 @@ class Incident extends Model
      */
     public function latestRemediationRun(): HasOne
     {
-        return $this->hasOne(RemediationRun::class)->latestOfMany();
+        return $this->hasOne(RemediationRun::class)->latest('created_at');
     }
 
     /**
@@ -492,7 +493,7 @@ class Incident extends Model
      */
     public function latestTrace(): HasOne
     {
-        return $this->hasOne(Trace::class)->latestOfMany();
+        return $this->hasOne(Trace::class)->latest('created_at');
     }
 
     /**

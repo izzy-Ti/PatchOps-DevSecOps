@@ -53,7 +53,7 @@ class PatchArtifact extends Model
      */
     public function latestQualityGateRun(): HasOne
     {
-        return $this->hasOne(QualityGateRun::class, 'patch_id')->latestOfMany();
+        return $this->hasOne(QualityGateRun::class, 'patch_id')->latest('created_at');
     }
 
     /**
@@ -69,7 +69,7 @@ class PatchArtifact extends Model
      */
     public function latestApproval(): HasOne
     {
-        return $this->hasOne(Approval::class, 'patch_id')->latestOfMany();
+        return $this->hasOne(Approval::class, 'patch_id')->latest('created_at');
     }
 
     /**

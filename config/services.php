@@ -49,4 +49,16 @@ return [
         'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
     ],
 
+    'github' => [
+        'app_id' => env('GITHUB_APP_ID'),
+        'private_key_path' => env('GITHUB_APP_PRIVATE_KEY_PATH'),
+        'webhook_secret' => env('GITHUB_WEBHOOK_SECRET'),
+        'token' => env('GITHUB_TOKEN', env('GITHUB_PERSONAL_ACCESS_TOKEN')),
+    ],
+
+    'security' => [
+        'secrets_redaction_enabled' => (bool) env('SECRETS_REDACTION_ENABLED', true),
+        'quality_gate_max_iterations' => (int) env('QUALITY_GATE_MAX_ITERATIONS', 3),
+    ],
+
 ];

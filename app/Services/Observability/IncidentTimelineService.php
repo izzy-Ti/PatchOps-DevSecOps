@@ -17,7 +17,7 @@ class IncidentTimelineService
      */
     public function buildTimeline(Incident $incident): array
     {
-        $events = new Collection();
+        $events = new Collection;
 
         // 1. Audit events
         $auditEvents = AuditEvent::where('incident_id', $incident->id)->get();
@@ -58,7 +58,6 @@ class IncidentTimelineService
                 ],
             ]);
         }
-
 
         // 3. Verification checks
         $checks = VerificationCheck::whereHas('remediationRun', function ($query) use ($incident) {
