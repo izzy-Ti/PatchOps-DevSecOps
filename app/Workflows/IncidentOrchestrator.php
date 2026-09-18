@@ -256,10 +256,14 @@ class IncidentOrchestrator
             if ($result->success) {
                 $data = $result->data;
                 $attempts = $incident->getPatchAttempts();
+                $summary = (string) ($data['verdict_summary'] ?? $data['summary'] ?? '');
                 $incident->metadata = array_merge($incident->metadata ?? [], [
                     'validation_test_output' => $data['test_output'] ?? '',
                     'validation_build_output' => $data['build_output'] ?? '',
-                    'validation_summary' => $data['summary'] ?? '',
+                    'validation_summary' => $summary,
+                    'validation_checks' => $data['checks'] ?? [],
+                    'vulnerability_mitigated' => (bool) ($data['vulnerability_mitigated'] ?? true),
+                    'regressions_detected' => (bool) ($data['regressions_detected'] ?? false),
                     'validated_at' => now()->toIso8601String(),
                 ]);
                 $incident->save();
@@ -271,7 +275,7 @@ class IncidentOrchestrator
                     actorType: 'agent',
                     actorId: 'validation-agent',
                     metadata: [
-                        'summary' => $data['summary'] ?? '',
+                        'summary' => $summary,
                         'attempts' => $attempts,
                     ],
                 );
@@ -280,11 +284,20 @@ class IncidentOrchestrator
                 $error = $result->error;
                 $currentAttempt = $incident->incrementPatchAttempts();
 
+                $failureEvidence = $error?->details['failure_evidence'] ?? [];
+                $checks = $error?->details['checks'] ?? [];
+                $synthesizerGuidance = $failureEvidence['synthesizer_guidance'] ?? $error?->message;
+                $failedTests = $failureEvidence['failed_tests'] ?? [];
+
                 $historyItem = [
                     'attempt' => $currentAttempt,
                     'diff' => $incident->metadata['diff'] ?? null,
                     'feedback' => $error?->message,
-                    'test_output' => $error?->details['test_output'] ?? null,
+                    'synthesizer_guidance' => $synthesizerGuidance,
+                    'failed_tests' => $failedTests,
+                    'failure_evidence' => $failureEvidence,
+                    'checks' => $checks,
+                    'test_output' => $failureEvidence['stdout'] ?? $error?->details['test_output'] ?? null,
                     'build_output' => $error?->details['build_output'] ?? null,
                     'failed_at' => now()->toIso8601String(),
                 ];
@@ -293,6 +306,10 @@ class IncidentOrchestrator
 
                 $incident->metadata = array_merge($incident->metadata ?? [], [
                     'last_validation_feedback' => $error?->message,
+                    'last_synthesizer_guidance' => $synthesizerGuidance,
+                    'last_failed_tests' => $failedTests,
+                    'last_failure_evidence' => $failureEvidence,
+                    'last_validation_checks' => $checks,
                     'validation_history' => $history,
                 ]);
                 $incident->save();
@@ -308,6 +325,7 @@ class IncidentOrchestrator
                         actorId: 'validation-agent',
                         metadata: [
                             'feedback' => $error?->message,
+                            'synthesizer_guidance' => $synthesizerGuidance,
                             'attempt' => $currentAttempt,
                             'error_code' => $error?->code,
                         ],

@@ -92,7 +92,7 @@ class AuditLogger
         array $payload = [],
         ?string $correlationId = null,
     ): AuditLog {
-        return AuditLog::create([
+        $log = AuditLog::create([
             'correlation_id' => static::resolveCorrelationId($correlationId),
             'actor_type' => 'system',
             'actor_id' => null,
@@ -102,5 +102,58 @@ class AuditLogger
             'payload' => $payload,
             'ip_address' => null,
         ]);
+
+        static::recordImmutableAuditEvent(
+            actorType: 'system',
+            actorId: 'system',
+            action: $event,
+            auditable: $auditable,
+            payload: $payload,
+            ip: null,
+        );
+
+        return $log;
+    }
+
+    /**
+     * Persist to immutable audit_events table when an incident or auditable is present.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected static function recordImmutableAuditEvent(
+        string $actorType,
+        ?string $actorId,
+        string $action,
+        ?Model $auditable,
+        array $payload,
+        ?string $ip = null,
+    ): void {
+        try {
+            $incidentId = null;
+            if ($auditable instanceof \App\Models\Incident) {
+                $incidentId = $auditable->id;
+            } elseif (isset($payload['incident_id'])) {
+                $incidentId = $payload['incident_id'];
+            } elseif ($auditable && method_exists($auditable, 'incident') && $auditable->incident_id) {
+                $incidentId = $auditable->incident_id;
+            }
+
+            if ($incidentId) {
+                $redactor = app(\App\Services\Security\SecretRedactionService::class);
+                \App\Models\AuditEvent::create([
+                    'incident_id' => $incidentId,
+                    'actor_type' => $actorType,
+                    'actor_id' => $actorId,
+                    'action' => $action,
+                    'resource_type' => $auditable?->getMorphClass(),
+                    'resource_id' => (string) $auditable?->getKey(),
+                    'metadata' => $redactor->redact($payload),
+                    'ip_address' => $ip,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Could not persist to audit_events: {$e->getMessage()}");
+        }
     }
 }
+

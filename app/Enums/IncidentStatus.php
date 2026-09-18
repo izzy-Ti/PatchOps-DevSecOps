@@ -14,8 +14,15 @@ enum IncidentStatus: string
     case PATCHING = 'patching';
     case VALIDATING = 'validating';
     case AWAITING_APPROVAL = 'awaiting_approval';
+    case APPROVED = 'approved';
     case PR_CREATED = 'pr_created';
     case CI_RUNNING = 'ci_running';
+    case READY_FOR_MERGE = 'ready_for_merge';
+    case MERGED = 'merged';
+    case DEPLOYING = 'deploying';
+    case DEPLOYED = 'deployed';
+    case POST_DEPLOY_VERIFY = 'post_deploy_verify';
+    case REMEDIATED = 'remediated';
     case VERIFIED = 'verified';
     case RESOLVED = 'resolved';
     case FAILED = 'failed';
@@ -89,6 +96,13 @@ enum IncidentStatus: string
                 self::CLOSED,
             ],
             self::AWAITING_APPROVAL => [
+                self::APPROVED,
+                self::PR_CREATED,
+                self::ESCALATED,
+                self::FAILED,
+                self::CLOSED,
+            ],
+            self::APPROVED => [
                 self::PR_CREATED,
                 self::ESCALATED,
                 self::FAILED,
@@ -101,12 +115,50 @@ enum IncidentStatus: string
                 self::CLOSED,
             ],
             self::CI_RUNNING => [
+                self::READY_FOR_MERGE,
+                self::VERIFIED,
+                self::PATCHING,
+                self::FAILED,
+                self::ESCALATED,
+                self::CLOSED,
+            ],
+            self::READY_FOR_MERGE => [
+                self::MERGED,
+                self::FAILED,
+                self::ESCALATED,
+                self::CLOSED,
+            ],
+            self::MERGED => [
+                self::DEPLOYING,
+                self::FAILED,
+                self::ESCALATED,
+                self::CLOSED,
+            ],
+            self::DEPLOYING => [
+                self::DEPLOYED,
+                self::FAILED,
+                self::ESCALATED,
+                self::CLOSED,
+            ],
+            self::DEPLOYED => [
+                self::POST_DEPLOY_VERIFY,
+                self::FAILED,
+                self::ESCALATED,
+                self::CLOSED,
+            ],
+            self::POST_DEPLOY_VERIFY => [
+                self::REMEDIATED,
                 self::VERIFIED,
                 self::FAILED,
                 self::ESCALATED,
                 self::CLOSED,
             ],
+            self::REMEDIATED => [
+                self::RESOLVED,
+                self::CLOSED,
+            ],
             self::VERIFIED => [
+                self::REMEDIATED,
                 self::RESOLVED,
                 self::ESCALATED,
                 self::FAILED,
@@ -144,7 +196,7 @@ enum IncidentStatus: string
      */
     public function isTerminal(): bool
     {
-        return in_array($this, [self::RESOLVED, self::CLOSED, self::FAILED, self::TRIAGED_NOT_REPRODUCIBLE, self::INFRA_FAILED], true);
+        return in_array($this, [self::RESOLVED, self::CLOSED, self::FAILED, self::TRIAGED_NOT_REPRODUCIBLE, self::INFRA_FAILED, self::REMEDIATED], true);
     }
 
     /**

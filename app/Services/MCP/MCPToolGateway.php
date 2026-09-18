@@ -273,6 +273,26 @@ class MCPToolGateway
             // 13. Finalize tool_executions record as SUCCESS
             $this->finalizeExecutionRecord($executionRecord, 'success', $budgetBoundedOutput, $startTime);
 
+            // 13.5. Record distributed tracing tool_call telemetry
+            try {
+                app(\App\Services\Tracing\TraceManager::class)->recordToolCall([
+                    'agent_run_id' => $agentRunId,
+                    'incident_id' => $context->id,
+                    'trace_id' => app(\App\Services\Tracing\TraceManager::class)->currentTraceId() ?? $context->latestTrace?->id,
+                    'tool_name' => $toolName,
+                    'server_name' => 'mcp-gateway',
+                    'permission_scope' => $permission,
+                    'risk_level' => $riskLevel,
+                    'arguments' => $arguments,
+                    'result' => $budgetBoundedOutput,
+                    'status' => 'SUCCESS',
+                    'exit_code' => (int) ($rawOutput['exit_code'] ?? 0),
+                    'duration_ms' => (int) $durationMs,
+                ]);
+            } catch (\Throwable $err) {
+                Log::warning("TraceManager: Could not record tool_call: {$err->getMessage()}");
+            }
+
             // 14. Record Audit Event
             if (config('mcp.security.audit_invocations', true)) {
                 AuditLogger::logSystemAction(
@@ -299,6 +319,7 @@ class MCPToolGateway
                 'execution_time_seconds' => $executionTime,
                 'duration_ms' => $durationMs,
             ];
+
         } catch (HitlApprovalRequiredException $e) {
             $this->finalizeExecutionRecord($executionRecord, 'pending_approval', [
                 'reason' => $e->getMessage(),

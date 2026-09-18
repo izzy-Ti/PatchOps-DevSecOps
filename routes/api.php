@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\HealthController;
+use App\Http\Controllers\Api\IncidentApprovalController;
 use App\Http\Controllers\Api\IncidentController;
+use App\Http\Controllers\Api\IncidentObservabilityController;
 use App\Http\Controllers\Api\IncidentTelemetryController;
 use App\Http\Controllers\Api\Webhooks\CveWebhookController;
 use App\Http\Controllers\Api\Webhooks\GithubWebhookController;
@@ -13,6 +15,9 @@ use Illuminate\Support\Facades\Route;
 Route::middleware([EnsureCorrelationId::class])->group(function (): void {
     // Health Check
     Route::get('/health', HealthController::class)->name('health');
+
+    // Operational Metrics (v1)
+    Route::get('/v1/metrics', [IncidentObservabilityController::class, 'metrics'])->name('v1.metrics');
 
     // Authentication Routes
     Route::prefix('auth')->name('auth.')->group(function (): void {
@@ -37,12 +42,19 @@ Route::middleware([EnsureCorrelationId::class])->group(function (): void {
         Route::get('/{incident}', [IncidentTelemetryController::class, 'show'])->name('show');
         Route::get('/{incident}/agent-runs', [IncidentTelemetryController::class, 'agentRuns'])->name('agent-runs');
         Route::get('/{incident}/transitions', [IncidentTelemetryController::class, 'transitions'])->name('transitions');
+        Route::get('/{incident}/timeline', [IncidentObservabilityController::class, 'timeline'])->name('timeline');
+        Route::get('/{incident}/trace', [IncidentObservabilityController::class, 'trace'])->name('trace');
+        Route::post('/{incident}/patches/{patch}/approve', [IncidentApprovalController::class, 'approve'])->name('approve-patch');
+        Route::post('/{incident}/patches/{patch}/reject', [IncidentApprovalController::class, 'reject'])->name('reject-patch');
     });
+
 
     // Incidents Management (Protected)
     Route::middleware('auth:sanctum')->prefix('incidents')->name('incidents.')->group(function (): void {
         Route::get('/', [IncidentController::class, 'index'])->name('index');
         Route::post('/', [IncidentController::class, 'store'])->name('store');
         Route::get('/{incident}', [IncidentController::class, 'show'])->name('show');
+        Route::post('/{incident}/patches/{patch}/approve', [IncidentApprovalController::class, 'approve'])->name('patches.approve');
+        Route::post('/{incident}/patches/{patch}/reject', [IncidentApprovalController::class, 'reject'])->name('patches.reject');
     });
 });

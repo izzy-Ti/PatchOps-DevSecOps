@@ -157,3 +157,65 @@ test('PatchAgent includes previous validation diagnostics in prompt context when
         ->and($context)->toContain('Call to a member function sanitize() on null')
         ->and($context)->toContain('--- a/SecurityService.php');
 });
+
+test('IncidentOrchestrator routes Reviewer structured feedback and synthesizer guidance into PatchAgent retry context', function () {
+    Queue::fake();
+
+    $incident = Incident::factory()->create([
+        'status' => IncidentStatus::VALIDATING,
+        'metadata' => [
+            'diff' => "--- a/src/Token.php\n+++ b/src/Token.php\n",
+        ],
+    ]);
+
+    $orchestrator = app(IncidentOrchestrator::class);
+
+    $adversarialRejection = AgentResultDTO::failure(
+        code: AgentErrorDTO::TEST_FAILED,
+        message: 'The null-check added in src/Token.php:30 breaks legacy JWT resolution.',
+        details: [
+            'approved' => false,
+            'verdict_summary' => 'Patch mitigates CVE-2026-9999 but causes regression in legacy token parsing.',
+            'checks' => [
+                [
+                    'check_name' => 'Legacy JWT Parser Test',
+                    'command' => 'npm test -- -t LegacyTokenTest',
+                    'exit_code' => 1,
+                    'passed' => false,
+                    'details' => 'Expected token object, received null',
+                ],
+            ],
+            'failure_evidence' => [
+                'stdout' => 'FAIL tests/LegacyTokenTest.js',
+                'stderr' => '',
+                'failed_tests' => ['LegacyTokenTest > testParseLegacyBearerToken'],
+                'synthesizer_guidance' => 'Ensure null safety while preserving fallback for unpadded base64 legacy tokens.',
+            ],
+        ],
+        metadata: ['agent' => 'ValidationAgent'],
+    );
+
+    $orchestrator->handleValidationResult($incident, $adversarialRejection);
+
+    $incident->refresh();
+    expect($incident->status)->toBe(IncidentStatus::PATCHING)
+        ->and($incident->metadata['last_synthesizer_guidance'])->toBe('Ensure null safety while preserving fallback for unpadded base64 legacy tokens.')
+        ->and($incident->metadata['last_failed_tests'])->toEqual(['LegacyTokenTest > testParseLegacyBearerToken'])
+        ->and($incident->metadata['last_validation_checks'])->toHaveCount(1);
+
+    Queue::assertPushed(GeneratePatchJob::class, 1);
+
+    // Verify PatchAgent generates context with the Reviewer's synthesizer guidance and failed tests
+    $agent = new PatchAgent;
+    $reflection = new ReflectionClass($agent);
+    $method = $reflection->getMethod('buildContext');
+    $method->setAccessible(true);
+
+    $promptContext = $method->invoke($agent, $incident);
+
+    expect($promptContext)->toContain('Reviewer Guidance for Synthesizer:')
+        ->and($promptContext)->toContain('Ensure null safety while preserving fallback for unpadded base64 legacy tokens.')
+        ->and($promptContext)->toContain('Failed Tests Detected: LegacyTokenTest > testParseLegacyBearerToken')
+        ->and($promptContext)->toContain('Failed Verification Checks:')
+        ->and($promptContext)->toContain('Legacy JWT Parser Test: Expected token object, received null');
+});

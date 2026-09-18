@@ -78,6 +78,23 @@ return [
             AgentTool::SANDBOX_DESTROY_ENVIRONMENT->value,
         ],
 
+        AgentRole::REVIEWER->value => [
+            AgentTool::GITHUB_GET_REPOSITORY->value,
+            AgentTool::GITHUB_GET_FILE->value,
+            AgentTool::GITHUB_GET_DEPENDENCY_MANIFEST->value,
+            AgentTool::GITHUB_GET_PULL_REQUEST->value,
+            AgentTool::VULN_GET_CVE->value,
+            AgentTool::VULN_GET_ADVISORY->value,
+            AgentTool::REPO_INSPECT_STRUCTURE->value,
+            AgentTool::REPO_READ_FILE->value,
+            AgentTool::REPO_SEARCH_CODE->value,
+            AgentTool::REPO_INSPECT_DEPENDENCIES->value,
+            AgentTool::SANDBOX_CREATE_ENVIRONMENT->value,
+            AgentTool::SANDBOX_EXECUTE->value,
+            AgentTool::SANDBOX_COLLECT_OUTPUT->value,
+            AgentTool::SANDBOX_DESTROY_ENVIRONMENT->value,
+        ],
+
         AgentRole::POST_APPROVAL->value => [
             AgentTool::GITHUB_GET_REPOSITORY->value,
             AgentTool::GITHUB_GET_FILE->value,

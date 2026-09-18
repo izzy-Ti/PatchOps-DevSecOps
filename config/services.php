@@ -41,4 +41,12 @@ return [
         'version' => '2023-06-01',
     ],
 
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+        'model' => env('GEMINI_MODEL', 'gemini-1.5-pro-latest'),
+        'temperature' => (float) env('GEMINI_TEMPERATURE', 0.1),
+        'max_tokens' => (int) env('GEMINI_MAX_OUTPUT_TOKENS', 8192),
+        'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
+    ],
+
 ];

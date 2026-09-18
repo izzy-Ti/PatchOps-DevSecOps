@@ -1,5 +1,7 @@
 <?php
 
+use App\Tools\MCP\GitHub\ApplyAndCommitPatchTool;
+use App\Tools\MCP\GitHub\CreateBranchTool;
 use App\Tools\MCP\GitHub\CreatePullRequestTool;
 use App\Tools\MCP\GitHub\GetDependencyManifestTool;
 use App\Tools\MCP\GitHub\GetFileTool;
@@ -15,6 +17,7 @@ use App\Tools\MCP\Sandbox\DestroyEnvironmentTool;
 use App\Tools\MCP\Sandbox\ExecuteCommandTool;
 use App\Tools\MCP\Sandbox\InstallDependenciesTool;
 use App\Tools\MCP\Terminal\RecordReproductionResultTool;
+use App\Tools\MCP\Terminal\RecordReviewVerdictTool;
 use App\Tools\MCP\Vulnerability\GetAdvisoryTool;
 use App\Tools\MCP\Vulnerability\GetCveTool;
 use App\Tools\MCP\Vulnerability\SearchVulnerabilityTool;
@@ -36,6 +39,8 @@ return [
         GetRepositoryTool::class,
         GetFileTool::class,
         GetDependencyManifestTool::class,
+        CreateBranchTool::class,
+        ApplyAndCommitPatchTool::class,
         CreatePullRequestTool::class,
         GetCveTool::class,
         GetAdvisoryTool::class,
@@ -51,6 +56,7 @@ return [
         CollectLogsTool::class,
         DestroyEnvironmentTool::class,
         RecordReproductionResultTool::class,
+        RecordReviewVerdictTool::class,
     ],
 
     /*
@@ -94,7 +100,21 @@ return [
             ToolPermission::SANDBOX_DESTROY->value,
         ],
 
+        AgentRole::REVIEWER->value => [
+            ToolPermission::GITHUB_READ->value,
+            ToolPermission::VULNERABILITY_READ->value,
+            ToolPermission::REPOSITORY_READ->value,
+            ToolPermission::SANDBOX_PROVISION->value,
+            ToolPermission::SANDBOX_EXECUTE->value,
+            ToolPermission::SANDBOX_DESTROY->value,
+        ],
+
         AgentRole::POST_APPROVAL->value => [
+            ToolPermission::GITHUB_READ->value,
+            ToolPermission::GITHUB_WRITE->value,
+        ],
+
+        AgentRole::ORCHESTRATOR->value => [
             ToolPermission::GITHUB_READ->value,
             ToolPermission::GITHUB_WRITE->value,
         ],

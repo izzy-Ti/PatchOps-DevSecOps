@@ -6,6 +6,7 @@ use App\DTOs\AgentErrorDTO;
 use App\DTOs\AgentResultDTO;
 use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
+use App\Services\MCP\GeminiReActEngine;
 use App\Services\MCP\MCPToolGateway;
 use App\Tools\Enums\AgentRole;
 use App\Tools\ToolRegistry;
@@ -51,6 +52,11 @@ PROMPT;
     public function analyze(Incident $incident, ?int $agentRunId = null): AgentResultDTO
     {
         $startTime = microtime(true);
+        $geminiKey = config('services.gemini.api_key');
+        if (! empty($geminiKey)) {
+            return $this->analyzeWithGemini($incident, $startTime, $agentRunId);
+        }
+
         $apiKey = config('services.anthropic.key');
         $model = config('services.anthropic.model', 'claude-3-5-sonnet-latest');
         $version = config('services.anthropic.version', '2023-06-01');
@@ -75,42 +81,7 @@ PROMPT;
         // 1. Compile authorized tool definitions for Triage role
         $roleTools = $this->toolRegistry->getToolSchemasForRole(AgentRole::TRIAGE);
 
-        $terminalTool = [
-            'name' => 'record_triage_analysis',
-            'description' => 'Submit final security triage analysis, severity, priority, production exposure, and evidence after completing investigation.',
-            'input_schema' => [
-                'type' => 'object',
-                'properties' => [
-                    'severity' => [
-                        'type' => 'string',
-                        'enum' => ['critical', 'high', 'medium', 'low'],
-                        'description' => 'The assessed severity level of the vulnerability.',
-                    ],
-                    'priority' => [
-                        'type' => 'string',
-                        'enum' => ['critical', 'high', 'medium', 'low'],
-                        'description' => 'The remediation urgency priority.',
-                    ],
-                    'production_exposed' => [
-                        'type' => 'boolean',
-                        'description' => 'True if the vulnerable dependency or component is exposed in runtime/production.',
-                    ],
-                    'affected_component' => [
-                        'type' => 'string',
-                        'description' => 'The specific package, module, or component affected.',
-                    ],
-                    'reason' => [
-                        'type' => 'string',
-                        'description' => 'Detailed technical reasoning explaining severity, priority, and production impact.',
-                    ],
-                    'evidence_summary' => [
-                        'type' => 'string',
-                        'description' => 'Summary of findings gathered during the investigation.',
-                    ],
-                ],
-                'required' => ['severity', 'priority', 'production_exposed', 'affected_component', 'reason'],
-            ],
-        ];
+        $terminalTool = $this->getTerminalToolSchema();
 
         $availableTools = array_merge($roleTools, [$terminalTool]);
 
@@ -321,5 +292,120 @@ PROMPT;
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Analyze incident using Google Gemini ReAct Engine.
+     */
+    protected function analyzeWithGemini(Incident $incident, float $startTime, ?int $agentRunId = null): AgentResultDTO
+    {
+        $maxSteps = (int) config('patchops.max_triage_steps', self::MAX_REACT_STEPS);
+        $roleTools = $this->toolRegistry->getToolSchemasForRole(AgentRole::TRIAGE);
+        $terminalTool = $this->getTerminalToolSchema();
+        $availableTools = array_merge($roleTools, [$terminalTool]);
+
+        $incident->loadMissing('vulnerability');
+        $context = [
+            'incident_id' => $incident->id,
+            'incident_number' => $incident->incident_number,
+            'title' => $incident->title,
+            'repository' => $incident->repository,
+            'cve_identifier' => $incident->vulnerability?->cve_id ?? 'CVE-UNKNOWN',
+            'prompt_context' => $this->buildContext($incident),
+        ];
+
+        try {
+            /** @var GeminiReActEngine $geminiEngine */
+            $geminiEngine = app(GeminiReActEngine::class);
+            $result = $geminiEngine->run(
+                role: AgentRole::TRIAGE,
+                systemInstruction: self::SYSTEM_PROMPT,
+                context: $context,
+                tools: $availableTools,
+                maxIterations: $maxSteps,
+                incident: $incident,
+                agentRunId: $agentRunId,
+            );
+
+            $executionTime = round(microtime(true) - $startTime, 3);
+
+            // Store evidence in incident metadata
+            $existingMetadata = is_array($incident->metadata)
+                ? $incident->metadata
+                : (is_string($incident->metadata) ? (json_decode($incident->metadata, true) ?? []) : []);
+
+            $incident->metadata = array_merge($existingMetadata, [
+                'triage_result' => $result,
+            ]);
+            $incident->save();
+
+            return AgentResultDTO::success(
+                data: $result,
+                metadata: [
+                    'agent' => 'TriageAgent',
+                    'engine' => 'gemini',
+                    'execution_time_seconds' => $executionTime,
+                ],
+            );
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            Log::error('Gemini error during triage ReAct loop.', [
+                'incident_id' => $incident->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::LLM_API_ERROR,
+                message: "Gemini API error: {$e->getMessage()}",
+                details: ['exception' => $e->getMessage()],
+                metadata: ['agent' => 'TriageAgent', 'engine' => 'gemini'],
+            );
+        }
+    }
+
+    /**
+     * Get the JSON schema for record_triage_analysis tool.
+     *
+     * @return array<string, mixed>
+     */
+    protected function getTerminalToolSchema(): array
+    {
+        return [
+            'name' => 'record_triage_analysis',
+            'description' => 'Submit final security triage analysis, severity, priority, production exposure, and evidence after completing investigation.',
+            'input_schema' => [
+                'type' => 'object',
+                'properties' => [
+                    'severity' => [
+                        'type' => 'string',
+                        'enum' => ['critical', 'high', 'medium', 'low'],
+                        'description' => 'The assessed severity level of the vulnerability.',
+                    ],
+                    'priority' => [
+                        'type' => 'string',
+                        'enum' => ['critical', 'high', 'medium', 'low'],
+                        'description' => 'The remediation urgency priority.',
+                    ],
+                    'production_exposed' => [
+                        'type' => 'boolean',
+                        'description' => 'True if the vulnerable dependency or component is exposed in runtime/production.',
+                    ],
+                    'affected_component' => [
+                        'type' => 'string',
+                        'description' => 'The specific package, module, or component affected.',
+                    ],
+                    'reason' => [
+                        'type' => 'string',
+                        'description' => 'Detailed technical reasoning explaining severity, priority, and production impact.',
+                    ],
+                    'evidence_summary' => [
+                        'type' => 'string',
+                        'description' => 'Summary of findings gathered during the investigation.',
+                    ],
+                ],
+                'required' => ['severity', 'priority', 'production_exposed', 'affected_component', 'reason'],
+            ],
+        ];
     }
 }

@@ -8,5 +8,7 @@ enum AgentRole: string
     case REPRODUCTION = 'reproduction';
     case PATCH = 'patch';
     case VALIDATION = 'validation';
+    case REVIEWER = 'reviewer';
     case POST_APPROVAL = 'post_approval';
+    case ORCHESTRATOR = 'orchestrator';
 }

@@ -7,6 +7,7 @@ use App\DTOs\AgentResultDTO;
 use App\DTOs\ReproductionResultDTO;
 use App\Exceptions\TransientAgentInfrastructureException;
 use App\Models\Incident;
+use App\Services\MCP\GeminiReActEngine;
 use App\Services\MCP\MCPToolGateway;
 use App\Tools\Enums\AgentRole;
 use App\Tools\ToolRegistry;
@@ -79,12 +80,17 @@ PROMPT;
     public function reproduce(Incident $incident, ?int $agentRunId = null): AgentResultDTO
     {
         $startTime = microtime(true);
+        $incident->loadMissing('vulnerability');
+
+        $geminiKey = config('services.gemini.api_key');
+        if (! empty($geminiKey)) {
+            return $this->reproduceWithGemini($incident, $startTime, $agentRunId);
+        }
+
         $apiKey = config('services.anthropic.key');
         $model = config('services.anthropic.model', 'claude-3-5-sonnet-latest');
         $version = config('services.anthropic.version', '2023-06-01');
         $maxSteps = (int) config('patchops.max_reproduction_steps', self::MAX_REACT_STEPS);
-
-        $incident->loadMissing('vulnerability');
 
         // Deterministic Fallback Mode when LLM key is omitted in offline/testing environments
         if (empty($apiKey)) {
@@ -96,54 +102,7 @@ PROMPT;
         // Compile authorized tool definitions for Reproduction role
         $roleTools = $this->toolRegistry->getToolSchemasForRole(AgentRole::REPRODUCTION);
 
-        $terminalTool = [
-            'name' => 'record_reproduction_result',
-            'description' => 'Submit final structured proof-of-concept reproduction evidence and update incident workflow state.',
-            'input_schema' => [
-                'type' => 'object',
-                'properties' => [
-                    'reproduced' => [
-                        'type' => 'boolean',
-                        'description' => 'True if the vulnerability exploit succeeded, False if safe or not reproducible.',
-                    ],
-                    'command' => [
-                        'type' => 'string',
-                        'description' => 'Exact test command executed (e.g. npm test).',
-                    ],
-                    'exit_code' => [
-                        'type' => 'integer',
-                        'description' => 'Process exit code from test runner.',
-                    ],
-                    'stdout' => [
-                        'type' => 'string',
-                        'description' => 'Bounded standard output stream captured from sandbox.',
-                    ],
-                    'stderr' => [
-                        'type' => 'string',
-                        'description' => 'Bounded standard error stream captured from sandbox.',
-                    ],
-                    'duration_ms' => [
-                        'type' => 'number',
-                        'description' => 'Total execution runtime in milliseconds.',
-                    ],
-                    'environment' => [
-                        'type' => 'object',
-                        'description' => 'Runtime details (runtime, version, package manager).',
-                    ],
-                    'artifacts' => [
-                        'type' => 'array',
-                        'items' => ['type' => 'object'],
-                        'description' => 'Generated PoC scripts, file diffs, or stack traces.',
-                    ],
-                    'observations' => [
-                        'type' => 'array',
-                        'items' => ['type' => 'string'],
-                        'description' => 'Structured semantic conclusions extracted during reproduction.',
-                    ],
-                ],
-                'required' => ['reproduced', 'command', 'observations'],
-            ],
-        ];
+        $terminalTool = $this->getTerminalToolSchema();
 
         $availableTools = array_merge($roleTools, [$terminalTool]);
 
@@ -420,5 +379,125 @@ PROMPT;
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Synthesize and execute reproduction plan using Google Gemini ReAct Engine.
+     */
+    protected function reproduceWithGemini(Incident $incident, float $startTime, ?int $agentRunId = null): AgentResultDTO
+    {
+        $maxSteps = (int) config('patchops.max_reproduction_steps', self::MAX_REACT_STEPS);
+        $roleTools = $this->toolRegistry->getToolSchemasForRole(AgentRole::REPRODUCTION);
+        $terminalTool = $this->getTerminalToolSchema();
+        $availableTools = array_merge($roleTools, [$terminalTool]);
+
+        $context = [
+            'incident_id' => $incident->id,
+            'incident_number' => $incident->incident_number,
+            'title' => $incident->title,
+            'repository' => $incident->repository,
+            'cve_identifier' => $incident->vulnerability?->cve_id ?? 'CVE-UNKNOWN',
+            'severity' => $incident->vulnerability?->severity ?? 'high',
+            'description' => $incident->vulnerability?->description ?? '',
+            'affected_package' => $incident->vulnerability?->package_name ?? '',
+            'vulnerable_versions' => $incident->vulnerability?->vulnerable_versions ?? '',
+            'prompt_context' => $this->buildContext($incident),
+        ];
+
+        try {
+            /** @var GeminiReActEngine $geminiEngine */
+            $geminiEngine = app(GeminiReActEngine::class);
+            $result = $geminiEngine->run(
+                role: AgentRole::REPRODUCTION,
+                systemInstruction: self::SYSTEM_PROMPT,
+                context: $context,
+                tools: $availableTools,
+                maxIterations: $maxSteps,
+                incident: $incident,
+                agentRunId: $agentRunId,
+            );
+
+            $executionTime = round(microtime(true) - $startTime, 3);
+
+            return AgentResultDTO::success(
+                data: $result,
+                metadata: [
+                    'agent' => 'ReproductionAgent',
+                    'engine' => 'gemini',
+                    'execution_time_seconds' => $executionTime,
+                ],
+            );
+        } catch (TransientAgentInfrastructureException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            Log::error('Gemini error during reproduction ReAct loop.', [
+                'incident_id' => $incident->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return AgentResultDTO::failure(
+                code: AgentErrorDTO::LLM_API_ERROR,
+                message: "Gemini API error: {$e->getMessage()}",
+                details: ['exception' => $e->getMessage()],
+                metadata: ['agent' => 'ReproductionAgent', 'engine' => 'gemini'],
+            );
+        }
+    }
+
+    /**
+     * Get the JSON schema for record_reproduction_result tool.
+     *
+     * @return array<string, mixed>
+     */
+    protected function getTerminalToolSchema(): array
+    {
+        return [
+            'name' => 'record_reproduction_result',
+            'description' => 'Submit final structured proof-of-concept reproduction evidence and update incident workflow state.',
+            'input_schema' => [
+                'type' => 'object',
+                'properties' => [
+                    'reproduced' => [
+                        'type' => 'boolean',
+                        'description' => 'True if the vulnerability exploit succeeded, False if safe or not reproducible.',
+                    ],
+                    'command' => [
+                        'type' => 'string',
+                        'description' => 'Exact test command executed (e.g. npm test).',
+                    ],
+                    'exit_code' => [
+                        'type' => 'integer',
+                        'description' => 'Process exit code from test runner.',
+                    ],
+                    'stdout' => [
+                        'type' => 'string',
+                        'description' => 'Bounded standard output stream captured from sandbox.',
+                    ],
+                    'stderr' => [
+                        'type' => 'string',
+                        'description' => 'Bounded standard error stream captured from sandbox.',
+                    ],
+                    'duration_ms' => [
+                        'type' => 'number',
+                        'description' => 'Total execution runtime in milliseconds.',
+                    ],
+                    'environment' => [
+                        'type' => 'object',
+                        'description' => 'Runtime details (runtime, version, package manager).',
+                    ],
+                    'artifacts' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'object'],
+                        'description' => 'Generated PoC scripts, file diffs, or stack traces.',
+                    ],
+                    'observations' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'string'],
+                        'description' => 'Structured semantic conclusions extracted during reproduction.',
+                    ],
+                ],
+                'required' => ['reproduced', 'command', 'observations'],
+            ],
+        ];
     }
 }

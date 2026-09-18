@@ -18,9 +18,15 @@ class AgentRun extends Model
      */
     protected $fillable = [
         'incident_id',
+        'trace_id',
         'agent_type',
         'status',
         'attempt',
+        'iteration',
+        'model',
+        'input_tokens',
+        'output_tokens',
+        'duration_ms',
         'input_context',
         'output',
         'error',
@@ -39,6 +45,10 @@ class AgentRun extends Model
     {
         return [
             'attempt' => 'integer',
+            'iteration' => 'integer',
+            'input_tokens' => 'integer',
+            'output_tokens' => 'integer',
+            'duration_ms' => 'integer',
             'input_context' => 'array',
             'output' => 'array',
             'error' => 'array',
@@ -58,6 +68,11 @@ class AgentRun extends Model
         return $this->belongsTo(Incident::class);
     }
 
+    public function trace(): BelongsTo
+    {
+        return $this->belongsTo(Trace::class, 'trace_id');
+    }
+
     /**
      * Get the tool executions performed during this agent run.
      *
@@ -66,5 +81,10 @@ class AgentRun extends Model
     public function toolExecutions(): HasMany
     {
         return $this->hasMany(ToolExecution::class)->orderBy('id', 'asc');
+    }
+
+    public function toolCalls(): HasMany
+    {
+        return $this->hasMany(ToolCall::class, 'agent_run_id');
     }
 }

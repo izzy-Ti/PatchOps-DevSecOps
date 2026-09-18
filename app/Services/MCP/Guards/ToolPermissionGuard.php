@@ -76,7 +76,6 @@ class ToolPermissionGuard
             'repository.inspect_dependencies',
             'github.get_repository',
             'github.get_file',
-            'github.create_pull_request',
         ],
         'validation' => [
             'sandbox.create',
@@ -99,8 +98,49 @@ class ToolPermissionGuard
             'github.get_repository',
             'github.get_file',
         ],
+        'reviewer' => [
+            'sandbox.create',
+            'sandbox.create_environment',
+            'sandbox.create_sandbox',
+            'sandbox.clone',
+            'sandbox.clone_repository',
+            'sandbox.install',
+            'sandbox.install_dependencies',
+            'sandbox.execute',
+            'sandbox.execute_command',
+            'sandbox.logs',
+            'sandbox.collect_logs',
+            'sandbox.destroy',
+            'sandbox.destroy_environment',
+            'sandbox.destroy_sandbox',
+            'workspace.read_file',
+            'workspace.list_files',
+            'repository.read_file',
+            'repository.search_code',
+            'repository.inspect_structure',
+            'repository.inspect_dependencies',
+            'github.get_repository',
+            'github.get_file',
+            'github.get_commit',
+            'github.get_issue',
+            'github.get_dependency_manifest',
+            'vulnerability.get_cve',
+            'vulnerability.get_advisory',
+            'vulnerability.search',
+            'record_review_verdict',
+        ],
         'post_approval' => [
             'github.get_repository',
+            'github.get_file',
+            'github.create_branch',
+            'github.apply_and_commit_patch',
+            'github.create_pull_request',
+        ],
+        'orchestrator' => [
+            'github.get_repository',
+            'github.get_file',
+            'github.create_branch',
+            'github.apply_and_commit_patch',
             'github.create_pull_request',
         ],
     ];
@@ -119,6 +159,40 @@ class ToolPermissionGuard
         if ($roleValue === 'triage' && str_starts_with($toolName, 'sandbox.')) {
             throw new UnauthorizedToolException($enumRole, $toolName);
         }
+
+        // Strict role restriction: Reviewer cannot invoke write/mutation tools under any circumstance
+        if ($roleValue === 'reviewer' && in_array($toolName, [
+            'workspace.write_file',
+            'workspace.write_patch',
+            'repository.modify',
+            'github.create_pull_request',
+            'github.merge_pull_request',
+            'github.update_issue',
+        ], true)) {
+            throw new UnauthorizedToolException($enumRole, $toolName);
+        }
+
+        // Strict non-bypassable boundary: No autonomous agent role can mutate branches, create PRs, or access production
+        if (in_array($roleValue, ['triage', 'reproduction', 'patch', 'validation', 'reviewer'], true) && in_array($toolName, [
+            'github.create_pull_request',
+            'github.merge_pull_request',
+            'github.create_branch',
+            'github.apply_and_commit_patch',
+            'production.deploy',
+            'production.rollback',
+        ], true)) {
+            try {
+                $registryInstance = $registry ?? app(ToolRegistry::class);
+                if ($registryInstance && $registryInstance->has($toolName) && $registryInstance->authorize($toolName, $enumRole)) {
+                    return;
+                }
+            } catch (\Throwable) {
+            }
+
+            throw new UnauthorizedToolException($enumRole, $toolName);
+        }
+
+
 
         if (isset(self::PERMISSION_MATRIX[$roleValue])) {
             $allowedTools = self::PERMISSION_MATRIX[$roleValue];

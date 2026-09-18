@@ -94,5 +94,30 @@ class SandboxSecurityAuditGuard
                 violatingPayload: 'privileged=true'
             );
         }
+
+        // 4. Non-Root Execution Enforcement
+        if (isset($arguments['user'])) {
+            $user = strtolower(trim((string) $arguments['user']));
+            if ($user === '0' || $user === 'root' || str_starts_with($user, '0:')) {
+                throw new ForbiddenHostCapabilityException(
+                    capability: 'root_container_execution',
+                    reason: 'CRITICAL ESCAPE BLOCKED: Containers must execute as non-root user (UID 1000:1000).',
+                    incident: $incident,
+                    violatingPayload: "user={$user}"
+                );
+            }
+        }
+
+        // 5. Command Allowlist & Injection Guard
+        if (in_array($toolName, ['sandbox.execute', 'sandbox.execute_command'], true) && ! empty($arguments['command'])) {
+            app(\App\Services\Security\CommandValidationGuard::class)->validateCommand((string) $arguments['command'], $incident);
+        }
+
+        // 6. Network Egress Target Guard
+        if (! empty($arguments['target_url']) || ! empty($arguments['endpoint']) || ! empty($arguments['host'])) {
+            $target = (string) ($arguments['target_url'] ?? $arguments['endpoint'] ?? $arguments['host']);
+            app(\App\Services\Sandbox\Guards\SandboxNetworkEgressGuard::class)->validateTarget($target, $incident);
+        }
     }
 }
+

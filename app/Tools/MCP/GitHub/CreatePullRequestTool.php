@@ -26,8 +26,10 @@ class CreatePullRequestTool implements ToolInterface
             inputSchema: $this->parametersSchema(),
             requiredPermission: $this->requiredPermission(),
             allowedAgents: [
-                AgentRole::PATCH,
+                AgentRole::POST_APPROVAL,
+                AgentRole::ORCHESTRATOR,
             ],
+
             riskLevel: RiskLevel::HIGH,
         );
     }
@@ -55,6 +57,10 @@ class CreatePullRequestTool implements ToolInterface
                     'type' => 'string',
                     'description' => 'Head branch containing the commit',
                 ],
+                'head' => [
+                    'type' => 'string',
+                    'description' => 'Alias for head branch containing the commit',
+                ],
                 'title' => [
                     'type' => 'string',
                     'description' => 'Title of the pull request',
@@ -69,7 +75,7 @@ class CreatePullRequestTool implements ToolInterface
                     'default' => 'main',
                 ],
             ],
-            'required' => ['repository', 'branch', 'title', 'body'],
+            'required' => ['repository', 'title', 'body'],
         ];
     }
 
@@ -84,13 +90,14 @@ class CreatePullRequestTool implements ToolInterface
         $parts = explode('/', $repoStr, 2);
         $owner = $parts[0] ?? 'org';
         $repo = $parts[1] ?? $repoStr;
+        $headBranch = $arguments['branch'] ?? $arguments['head'] ?? 'patchops-fix';
 
         $mcpResponse = $this->mcpClient->callTool('create_pull_request', [
             'owner' => $owner,
             'repo' => $repo,
             'title' => $arguments['title'],
             'body' => $arguments['body'],
-            'head' => $arguments['branch'],
+            'head' => $headBranch,
             'base' => $arguments['base'] ?? 'main',
         ]);
 
@@ -98,9 +105,14 @@ class CreatePullRequestTool implements ToolInterface
             return $mcpResponse;
         }
 
+        $prNumber = $mcpResponse['data']['number'] ?? 42;
+        $prUrl = $mcpResponse['data']['html_url'] ?? "https://github.com/{$repoStr}/pull/{$prNumber}";
+
         return [
-            'pull_request_number' => $mcpResponse['data']['number'] ?? 42,
-            'url' => $mcpResponse['data']['html_url'] ?? "https://github.com/{$repoStr}/pull/42",
+            'pr_number' => $prNumber,
+            'pull_request_number' => $prNumber,
+            'pr_url' => $prUrl,
+            'url' => $prUrl,
             'status' => 'open',
             'title' => $arguments['title'],
             'mcp_server' => '@modelcontextprotocol/server-github',

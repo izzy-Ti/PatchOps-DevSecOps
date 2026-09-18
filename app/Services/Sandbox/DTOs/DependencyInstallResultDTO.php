@@ -26,7 +26,7 @@ class DependencyInstallResultDTO
             sandboxId: (string) ($data['sandbox_id'] ?? ''),
             ecosystem: (string) ($data['ecosystem'] ?? 'unknown'),
             manifestDetected: (string) ($data['manifest_detected'] ?? 'none'),
-            commandExecuted: (string) ($data['command_executed'] ?? ''),
+            commandExecuted: (string) ($data['command_executed'] ?? ($data['command'] ?? 'npm install --ignore-scripts')),
             exitCode: (int) ($data['exit_code'] ?? 0),
             durationMs: (float) ($data['duration_ms'] ?? 0.0),
             stdout: (string) ($data['stdout'] ?? ''),

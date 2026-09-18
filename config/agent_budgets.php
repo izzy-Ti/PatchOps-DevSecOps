@@ -52,4 +52,24 @@ return [
         'allow_write' => false,
     ],
 
+    'post_approval' => [
+        'max_tool_calls' => 15,
+        'max_execution_seconds' => 300,
+        'max_sandboxes' => 0,
+        'max_response_bytes' => 100 * 1024,
+        'allowed_domains' => ['api.github.com'],
+        'allow_sandbox' => false,
+        'allow_write' => true,
+    ],
+
+    'orchestrator' => [
+        'max_tool_calls' => 15,
+        'max_execution_seconds' => 300,
+        'max_sandboxes' => 0,
+        'max_response_bytes' => 100 * 1024,
+        'allowed_domains' => ['api.github.com'],
+        'allow_sandbox' => false,
+        'allow_write' => true,
+    ],
+
 ];

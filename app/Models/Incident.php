@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 #[Fillable([
@@ -26,13 +27,16 @@ use Illuminate\Support\Str;
     'severity',
     'priority',
     'status',
+    'patch_iterations',
     'repository',
     'environment',
     'root_cause',
+    'escalation_reason',
     'assigned_agent',
     'metadata',
     'user_id',
     'resolved_at',
+    'remediated_at',
 ])]
 class Incident extends Model
 {
@@ -49,6 +53,7 @@ class Incident extends Model
         'priority' => IncidentPriority::MEDIUM,
         'status' => IncidentStatus::RECEIVED,
         'environment' => 'sandbox',
+        'patch_iterations' => 1,
     ];
 
     /**
@@ -73,8 +78,10 @@ class Incident extends Model
             'severity' => VulnerabilitySeverity::class,
             'priority' => IncidentPriority::class,
             'status' => IncidentStatus::class,
+            'patch_iterations' => 'integer',
             'metadata' => 'array',
             'resolved_at' => 'datetime',
+            'remediated_at' => 'datetime',
         ];
     }
 
@@ -317,5 +324,194 @@ class Incident extends Model
     public function sandboxes(): HasMany
     {
         return $this->hasMany(Sandbox::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get all patch artifacts generated for this incident.
+     *
+     * @return HasMany<PatchArtifact, $this>
+     */
+    public function patchArtifacts(): HasMany
+    {
+        return $this->hasMany(PatchArtifact::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get the latest patch artifact for this incident.
+     *
+     * @return HasOne<PatchArtifact, $this>
+     */
+    public function latestPatchArtifact(): HasOne
+    {
+        return $this->hasOne(PatchArtifact::class)->latestOfMany();
+    }
+
+    /**
+     * Get all quality gate runs for this incident.
+     *
+     * @return HasMany<QualityGateRun, $this>
+     */
+    public function qualityGateRuns(): HasMany
+    {
+        return $this->hasMany(QualityGateRun::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get the latest quality gate run for this incident.
+     *
+     * @return HasOne<QualityGateRun, $this>
+     */
+    public function latestQualityGateRun(): HasOne
+    {
+        return $this->hasOne(QualityGateRun::class)->latestOfMany();
+    }
+
+    /**
+     * Get all approvals recorded for this incident.
+     *
+     * @return HasMany<Approval, $this>
+     */
+    public function approvals(): HasMany
+    {
+        return $this->hasMany(Approval::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get the latest approval recorded for this incident.
+     *
+     * @return HasOne<Approval, $this>
+     */
+    public function latestApproval(): HasOne
+    {
+        return $this->hasOne(Approval::class)->latestOfMany();
+    }
+
+    /**
+     * Get all pull requests created for this incident.
+     *
+     * @return HasMany<PullRequest, $this>
+     */
+    public function pullRequests(): HasMany
+    {
+        return $this->hasMany(PullRequest::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get the latest pull request created for this incident.
+     *
+     * @return HasOne<PullRequest, $this>
+     */
+    public function latestPullRequest(): HasOne
+    {
+        return $this->hasOne(PullRequest::class)->latestOfMany();
+    }
+
+    /**
+     * Accessor for CVE identifier.
+     */
+    public function getCveIdentifierAttribute(): string
+    {
+        return (string) ($this->vulnerability?->cve_id
+            ?? $this->metadata['cve_id']
+            ?? $this->metadata['cve']
+            ?? $this->incident_number);
+    }
+
+    /**
+     * Accessor for vulnerable commit SHA.
+     */
+    public function getVulnerableCommitShaAttribute(): string
+    {
+        return (string) ($this->metadata['commit_sha']
+            ?? $this->metadata['vulnerable_commit_sha']
+            ?? 'HEAD~1');
+    }
+
+    /**
+     * Accessor for target base branch.
+     */
+    public function getBaseBranchAttribute(): string
+    {
+        return (string) ($this->metadata['base_branch'] ?? 'main');
+    }
+
+    /**
+     * Accessor for patch iterations count.
+     */
+    public function getPatchIterationsAttribute(): int
+    {
+        return (int) ($this->attributes['patch_iterations'] ?? $this->getPatchAttempts());
+    }
+
+    /**
+     * Increment the patch iterations count.
+     */
+    public function incrementPatchIterations(): int
+    {
+        $current = $this->patch_iterations + 1;
+        $this->patch_iterations = $current;
+        $this->save();
+
+        return $current;
+    }
+
+    /**
+     * Get all remediation runs for this incident.
+     *
+     * @return HasMany<RemediationRun, $this>
+     */
+    public function remediationRuns(): HasMany
+    {
+        return $this->hasMany(RemediationRun::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get the latest remediation run for this incident.
+     *
+     * @return HasOne<RemediationRun, $this>
+     */
+    public function latestRemediationRun(): HasOne
+    {
+        return $this->hasOne(RemediationRun::class)->latestOfMany();
+    }
+
+    /**
+     * Get all execution traces for this incident.
+     *
+     * @return HasMany<Trace, $this>
+     */
+    public function traces(): HasMany
+    {
+        return $this->hasMany(Trace::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get the latest execution trace for this incident.
+     *
+     * @return HasOne<Trace, $this>
+     */
+    public function latestTrace(): HasOne
+    {
+        return $this->hasOne(Trace::class)->latestOfMany();
+    }
+
+    /**
+     * Get all granular tool calls for this incident.
+     *
+     * @return HasMany<ToolCall, $this>
+     */
+    public function toolCalls(): HasMany
+    {
+        return $this->hasMany(ToolCall::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Get all immutable audit events for this incident.
+     *
+     * @return HasMany<AuditEvent, $this>
+     */
+    public function auditEvents(): HasMany
+    {
+        return $this->hasMany(AuditEvent::class)->orderBy('created_at', 'asc');
     }
 }
