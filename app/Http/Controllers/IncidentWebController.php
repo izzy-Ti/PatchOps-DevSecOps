@@ -7,8 +7,10 @@ use App\Http\Controllers\Api\IncidentApprovalController;
 use App\Models\Incident;
 use App\Models\PatchArtifact;
 use App\Models\QualityGateCheck;
+use App\Vulnerability\VulnerabilityIngestionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\View\View;
 
 class IncidentWebController extends Controller
@@ -60,14 +62,16 @@ class IncidentWebController extends Controller
 
         $totalChecks = QualityGateCheck::count();
         $passedChecks = QualityGateCheck::where('exit_code', 0)->count();
-        $passRate = $totalChecks > 0 ? round(($passedChecks / $totalChecks) * 100, 1) : 96.4;
+        $passRate = $totalChecks > 0 ? round(($passedChecks / $totalChecks) * 100, 1) : 0;
 
         return view('incidents.index', compact(
             'incidents',
             'activeCount',
             'awaitingApprovalCount',
             'remediatedCount',
-            'passRate'
+            'passRate',
+            'totalChecks',
+            'passedChecks'
         ));
     }
 
@@ -129,6 +133,74 @@ class IncidentWebController extends Controller
         } catch (\Throwable $e) {
             return redirect()->back()
                 ->with('error', 'Rejection failed: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Sync open security alerts directly from GitHub repository.
+     */
+    public function syncGithub(Request $request, VulnerabilityIngestionService $ingestionService): RedirectResponse
+    {
+        $token = config('services.github.token');
+        $repository = config('services.github.repository', 'izzy-Ti/PatchOps-DevSecOps');
+
+        if (empty($token)) {
+            return redirect()->route('incidents.index')
+                ->with('error', 'GitHub token not configured. Please add GITHUB_TOKEN to your .env file to enable live sync.');
+        }
+
+        try {
+            $response = Http::withToken($token)
+                ->withHeaders([
+                    'Accept' => 'application/vnd.github+json',
+                    'X-GitHub-Api-Version' => '2022-11-28',
+                ])
+                ->timeout(15)
+                ->get("https://api.github.com/repos/{$repository}/dependabot/alerts", [
+                    'state' => 'open',
+                    'per_page' => 30,
+                ]);
+
+            if ($response->unauthorized()) {
+                return redirect()->route('incidents.index')
+                    ->with('error', 'GitHub authentication failed. Please verify your GITHUB_TOKEN in .env has valid permissions.');
+            }
+
+            if ($response->forbidden()) {
+                return redirect()->route('incidents.index')
+                    ->with('error', 'Access to Dependabot alerts forbidden (403). Ensure Dependabot alerts are enabled on your repository.');
+            }
+
+            if (! $response->successful()) {
+                return redirect()->route('incidents.index')
+                    ->with('error', 'GitHub API error ('.$response->status().'): '.$response->body());
+            }
+
+            $alerts = $response->json();
+
+            if (empty($alerts)) {
+                return redirect()->route('incidents.index')
+                    ->with('success', "GitHub scan complete for [{$repository}]: 0 open Dependabot alerts found. Repository is secure!");
+            }
+
+            $count = 0;
+            foreach ($alerts as $alert) {
+                $payload = [
+                    'alert' => $alert,
+                    'repository' => [
+                        'full_name' => $repository,
+                    ],
+                ];
+
+                $ingestionService->ingest($payload, 'github');
+                $count++;
+            }
+
+            return redirect()->route('incidents.index')
+                ->with('success', "Successfully synced {$count} live security ".($count === 1 ? 'incident' : 'incidents')." from GitHub repository [{$repository}].");
+        } catch (\Throwable $e) {
+            return redirect()->route('incidents.index')
+                ->with('error', 'Failed to connect to GitHub: '.$e->getMessage());
         }
     }
 }

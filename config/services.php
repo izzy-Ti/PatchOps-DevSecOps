@@ -54,6 +54,7 @@ return [
         'private_key_path' => env('GITHUB_APP_PRIVATE_KEY_PATH'),
         'webhook_secret' => env('GITHUB_WEBHOOK_SECRET'),
         'token' => env('GITHUB_TOKEN', env('GITHUB_PERSONAL_ACCESS_TOKEN')),
+        'repository' => env('GITHUB_REPOSITORY', 'izzy-Ti/PatchOps-DevSecOps'),
     ],
 
     'security' => [

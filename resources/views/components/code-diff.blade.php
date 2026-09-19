@@ -13,23 +13,22 @@
     }
 @endphp
 
-<div x-data="{ copied: false }" class="rounded-md border border-[#30363d] bg-[#0d1117] overflow-hidden">
-    <!-- GitHub File Bar -->
-    <div class="px-4 py-2 bg-[#161b22] border-b border-[#30363d] flex items-center justify-between text-xs text-[#848d97]">
-        <div class="flex items-center space-x-2.5">
-            <!-- File icon -->
-            <svg class="w-4 h-4 text-[#848d97]" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm6.75.062V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914-.013-.011Z"/>
+<div x-data="{ copied: false }" class="rounded-lg border border-[#1f1f1f] bg-[#0c0c0c] w-full overflow-hidden">
+    <!-- Header Bar -->
+    <div class="px-4 py-2.5 bg-[#121212] border-b border-[#1f1f1f] flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-3">
+            <svg class="w-4 h-4 text-[#888888]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            <span class="font-mono text-sm font-semibold text-[#e6edf3]">{{ $fileName ?? 'patch.diff' }}</span>
+            <span class="font-mono text-xs font-semibold text-white">{{ $fileName ?? 'patch.diff' }}</span>
 
-            <!-- Diff Stats: +4 -2 -->
-            <div class="flex items-center space-x-1 pl-2 font-mono text-xs">
+            <!-- Diff Stats -->
+            <div class="flex items-center space-x-1.5 font-mono text-xs pl-2">
                 @if ($additions > 0)
-                    <span class="text-[#3fb950] font-semibold">+{{ $additions }}</span>
+                    <span class="text-[#00e599] font-semibold">+{{ $additions }}</span>
                 @endif
                 @if ($deletions > 0)
-                    <span class="text-[#f85149] font-semibold">-{{ $deletions }}</span>
+                    <span class="text-red-400 font-semibold">-{{ $deletions }}</span>
                 @endif
             </div>
         </div>
@@ -37,19 +36,18 @@
         <button 
             type="button" 
             @click="navigator.clipboard.writeText({{ json_encode($diff) }}); copied = true; setTimeout(() => copied = false, 2000)" 
-            class="px-2.5 py-1 rounded bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-[#c9d1d9] hover:text-white text-xs font-medium transition flex items-center space-x-1.5"
+            class="px-2.5 py-1 rounded bg-[#181818] hover:bg-[#222222] border border-[#2a2a2a] text-[#cccccc] hover:text-white text-xs font-mono transition flex items-center space-x-1.5"
         >
-            <svg class="w-3.5 h-3.5 text-[#848d97]" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
-                <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
-            <span x-show="!copied">Copy</span>
-            <span x-show="copied" x-cloak class="text-[#3fb950]">Copied!</span>
+            <span x-show="!copied">Copy diff</span>
+            <span x-show="copied" x-cloak class="text-[#00e599]">Copied!</span>
         </button>
     </div>
 
-    <!-- Monospaced Code Viewer (GitHub Diff Table) -->
-    <div class="overflow-x-auto max-h-[580px] font-mono text-xs leading-[20px]">
+    <!-- Monospaced Code Viewer -->
+    <div class="overflow-x-auto max-h-[580px] font-mono text-xs leading-[20px] bg-[#0a0a0a]">
         <table class="w-full border-collapse">
             <tbody>
                 @foreach ($lines as $index => $line)
@@ -60,25 +58,25 @@
                         $isFileHeader = str_starts_with($line, '---') || str_starts_with($line, '+++') || str_starts_with($line, 'diff ');
 
                         if ($isAddition) {
-                            $rowBg = 'bg-[#1f3526]/50 text-[#e6edf3]';
-                            $gutterBg = 'bg-[#1f3526] text-[#3fb950] border-r border-[#2ea043]/30 select-none';
+                            $rowBg = 'bg-[#00e599]/10 text-[#00e599]';
+                            $gutterBg = 'bg-[#00e599]/15 text-[#00e599] border-r border-[#00e599]/20';
                         } elseif ($isDeletion) {
-                            $rowBg = 'bg-[#3a1d1d]/50 text-[#e6edf3]';
-                            $gutterBg = 'bg-[#3a1d1d] text-[#f85149] border-r border-[#da3633]/30 select-none';
+                            $rowBg = 'bg-red-500/10 text-red-300';
+                            $gutterBg = 'bg-red-500/15 text-red-400 border-r border-red-500/20';
                         } elseif ($isHunk) {
-                            $rowBg = 'bg-[#161b22] text-[#848d97] font-medium';
-                            $gutterBg = 'bg-[#161b22] text-[#848d97] border-r border-[#30363d] select-none';
+                            $rowBg = 'bg-[#141414] text-[#888888] font-semibold';
+                            $gutterBg = 'bg-[#141414] text-[#666666] border-r border-[#222222]';
                         } elseif ($isFileHeader) {
-                            $rowBg = 'bg-[#161b22] text-[#848d97] font-medium';
-                            $gutterBg = 'bg-[#161b22] text-[#6e7681] border-r border-[#30363d] select-none';
+                            $rowBg = 'bg-[#121212] text-[#888888]';
+                            $gutterBg = 'bg-[#121212] text-[#555555] border-r border-[#222222]';
                         } else {
-                            $rowBg = 'text-[#e6edf3] hover:bg-[#161b22]/70';
-                            $gutterBg = 'bg-[#0d1117] text-[#6e7681] border-r border-[#30363d] select-none';
+                            $rowBg = 'text-[#cccccc] hover:bg-[#121212]';
+                            $gutterBg = 'bg-[#0c0c0c] text-[#555555] border-r border-[#1f1f1f]';
                         }
                     @endphp
                     <tr class="{{ $rowBg }}">
                         <!-- Line Number -->
-                        <td class="w-12 px-2 text-right text-[11px] {{ $gutterBg }}">
+                        <td class="w-12 px-2 text-right text-[11px] {{ $gutterBg }} select-none font-mono">
                             {{ $index + 1 }}
                         </td>
                         <!-- Code Line with exact indentation -->

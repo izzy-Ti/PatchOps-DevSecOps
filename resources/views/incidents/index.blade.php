@@ -1,65 +1,117 @@
 <x-layouts.app title="Security Incidents">
     <x-slot:breadcrumb>Incidents</x-slot:breadcrumb>
 
-    <!-- Top KPI Stat Cards (GitHub Style) -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <!-- Active Incidents -->
-        <div class="bg-[#161b22] border border-[#30363d] rounded-md p-4">
-            <div class="flex items-center justify-between text-xs text-[#848d97]">
-                <span>Active incidents</span>
-                <span class="w-2 h-2 rounded-full bg-[#58a6ff]"></span>
-            </div>
-            <div class="mt-2 flex items-baseline space-x-2">
-                <span class="text-2xl font-semibold text-[#e6edf3]">{{ $activeCount ?? 0 }}</span>
-                <span class="text-xs text-[#848d97]">in progress</span>
-            </div>
+    <!-- Page Header & Actions -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-white tracking-tight">Security Incidents</h1>
+            <p class="text-xs text-[#8e8e93] mt-1">Autonomous remediation telemetry, quality gates, and human approval boundary.</p>
         </div>
 
-        <!-- Awaiting Human Review -->
-        <div class="bg-[#161b22] border {{ ($awaitingApprovalCount ?? 0) > 0 ? 'border-[#d29922]/60 bg-[#d29922]/5' : 'border-[#30363d]' }} rounded-md p-4">
-            <div class="flex items-center justify-between text-xs {{ ($awaitingApprovalCount ?? 0) > 0 ? 'text-[#e3b341]' : 'text-[#848d97]' }}">
-                <span>Awaiting Human Review</span>
-                <span class="w-2 h-2 rounded-full {{ ($awaitingApprovalCount ?? 0) > 0 ? 'bg-[#d29922]' : 'bg-[#6e7681]' }}"></span>
-            </div>
-            <div class="mt-2 flex items-baseline space-x-2">
-                <span class="text-2xl font-semibold {{ ($awaitingApprovalCount ?? 0) > 0 ? 'text-[#e3b341]' : 'text-[#e6edf3]' }}">{{ $awaitingApprovalCount ?? 0 }}</span>
-                <span class="text-xs text-[#848d97]">gated at HITL boundary</span>
-            </div>
-        </div>
+        <div class="flex items-center space-x-2 flex-wrap gap-y-2">
+            <!-- GitHub Connection & Sync Button -->
+            <form method="POST" action="{{ route('incidents.github.sync') }}">
+                @csrf
+                <button type="submit" class="px-3.5 py-1.5 rounded-md bg-[#141414] hover:bg-[#1c1c1c] border border-[#2a2a2a] text-xs font-medium text-white transition flex items-center space-x-1.5 shadow-sm" title="Pull live security alerts from GitHub Dependabot">
+                    <svg class="w-3.5 h-3.5 text-[#00e599]" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+                    </svg>
+                    <span>Sync GitHub</span>
+                </button>
+            </form>
 
-        <!-- Remediated -->
-        <div class="bg-[#161b22] border border-[#30363d] rounded-md p-4">
-            <div class="flex items-center justify-between text-xs text-[#848d97]">
-                <span>Remediated</span>
-                <span class="w-2 h-2 rounded-full bg-[#3fb950]"></span>
-            </div>
-            <div class="mt-2 flex items-baseline space-x-2">
-                <span class="text-2xl font-semibold text-[#3fb950]">{{ $remediatedCount ?? 0 }}</span>
-                <span class="text-xs text-[#848d97]">verified & merged</span>
-            </div>
-        </div>
+            <a href="{{ route('incidents.index', ['status' => 'awaiting_approval']) }}" class="px-3.5 py-1.5 rounded-md bg-[#141414] hover:bg-[#1c1c1c] border border-[#2a2a2a] text-xs font-medium text-white transition flex items-center space-x-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                <span>Awaiting Review</span>
+                @if (($awaitingApprovalCount ?? 0) > 0)
+                    <span class="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-400/20 text-amber-300">{{ $awaitingApprovalCount }}</span>
+                @endif
+            </a>
 
-        <!-- Gate Pass Rate -->
-        <div class="bg-[#161b22] border border-[#30363d] rounded-md p-4">
-            <div class="flex items-center justify-between text-xs text-[#848d97]">
-                <span>Quality gate pass rate</span>
-                <span class="w-2 h-2 rounded-full bg-[#a371f7]"></span>
+            <a href="{{ route('incidents.index') }}" class="px-3.5 py-1.5 rounded-md bg-[#00e599] hover:bg-[#00c784] text-black font-semibold text-xs transition shadow-[0_0_12px_rgba(0,229,153,0.25)] flex items-center space-x-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>Refresh</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Telemetry Summary Metric Bar (Neon Console Style) -->
+    <div class="rounded-lg border border-[#1e1e1e] bg-[#0c0c0c] p-4 mb-6">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 divide-y md:divide-y-0 md:divide-x divide-[#1e1e1e]">
+            <!-- Active Incidents -->
+            <div class="pr-4 pt-2 md:pt-0">
+                <div class="flex items-center space-x-1.5 text-xs text-[#8e8e93]">
+                    <span>Active Incidents</span>
+                </div>
+                <div class="mt-1 flex items-baseline space-x-2">
+                    <span class="text-2xl font-bold font-mono text-white">{{ $activeCount ?? 0 }}</span>
+                    <span class="text-[11px] text-[#666666]">in progress</span>
+                </div>
             </div>
-            <div class="mt-2 flex items-baseline space-x-2">
-                <span class="text-2xl font-semibold text-[#e6edf3]">{{ $passRate ?? '96.4' }}%</span>
-                <span class="text-xs text-[#848d97]">passed 8/8 checks</span>
+
+            <!-- Awaiting Human Review -->
+            <div class="px-0 md:px-4 pt-2 md:pt-0">
+                <div class="flex items-center space-x-1.5 text-xs text-[#8e8e93]">
+                    <span>Awaiting Human Review</span>
+                    @if (($awaitingApprovalCount ?? 0) > 0)
+                        <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    @endif
+                </div>
+                <div class="mt-1 flex items-baseline space-x-2">
+                    <span class="text-2xl font-bold font-mono {{ ($awaitingApprovalCount ?? 0) > 0 ? 'text-amber-300' : 'text-white' }}">{{ $awaitingApprovalCount ?? 0 }}</span>
+                    <span class="text-[11px] text-[#666666]">pending sign-off</span>
+                </div>
+            </div>
+
+            <!-- Remediated -->
+            <div class="px-0 md:px-4 pt-2 md:pt-0">
+                <div class="flex items-center space-x-1.5 text-xs text-[#8e8e93]">
+                    <span>Remediated</span>
+                    <span class="w-1.5 h-1.5 rounded-full bg-[#00e599]"></span>
+                </div>
+                <div class="mt-1 flex items-baseline space-x-2">
+                    <span class="text-2xl font-bold font-mono text-[#00e599]">{{ $remediatedCount ?? 0 }}</span>
+                    <span class="text-[11px] text-[#666666]">verified &amp; merged</span>
+                </div>
+            </div>
+
+            <!-- Gate Pass Rate -->
+            <div class="pl-0 md:pl-4 pt-2 md:pt-0">
+                <div class="flex items-center space-x-1.5 text-xs text-[#8e8e93]">
+                    <span>Quality Gate Pass Rate</span>
+                </div>
+                <div class="mt-1 flex items-baseline space-x-2">
+                    <span class="text-2xl font-bold font-mono text-white">{{ $passRate ?? 0 }}%</span>
+                    <span class="text-[11px] text-[#666666]">
+                        @if (isset($totalChecks) && $totalChecks > 0)
+                            {{ $passedChecks }}/{{ $totalChecks }} checks
+                        @else
+                            checks active
+                        @endif
+                    </span>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- GitHub Search & Filter Bar -->
-    <div class="bg-[#161b22] border border-[#30363d] rounded-md p-3 mb-4">
-        <form method="GET" action="{{ route('incidents.index') }}" class="flex flex-col md:flex-row gap-2.5">
-            <!-- Search Query Input with Magnifier Icon -->
+    <!-- Section Title & Filter Toolbar -->
+    <div class="space-y-3 mb-4">
+        <div class="flex items-center justify-between text-xs text-[#8e8e93]">
+            <h2 class="text-base font-semibold text-white">
+                {{ $incidents->total() }} {{ Str::plural('Incident', $incidents->total()) }}
+            </h2>
+            <span>Showing recent items</span>
+        </div>
+
+        <!-- Filter Bar -->
+        <form method="GET" action="{{ route('incidents.index') }}" class="flex flex-col sm:flex-row gap-2.5">
+            <!-- Search Query Input -->
             <div class="relative flex-1">
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg class="w-4 h-4 text-[#848d97]" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z"/>
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#666666]">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                 </div>
                 <input 
@@ -67,25 +119,25 @@
                     name="search" 
                     value="{{ request('search') }}" 
                     placeholder="Search incidents, CVEs, or repositories..." 
-                    class="w-full pl-9 pr-3 py-1.5 rounded-md bg-[#0d1117] border border-[#30363d] text-sm text-[#e6edf3] placeholder-[#848d97] focus:outline-none focus:border-[#58a6ff] focus:ring-1 focus:ring-[#58a6ff]"
+                    class="w-full pl-9 pr-3 py-1.5 rounded-md bg-[#0f0f0f] border border-[#222222] text-xs text-white placeholder-[#666666] focus:outline-none focus:border-[#00e599] transition"
                 >
             </div>
 
-            <!-- Status Filter Dropdown -->
-            <div class="w-full md:w-48">
-                <select name="status" class="w-full px-3 py-1.5 rounded-md bg-[#0d1117] border border-[#30363d] text-sm text-[#e6edf3] focus:outline-none focus:border-[#58a6ff]">
+            <!-- Status Filter -->
+            <div class="w-full sm:w-44">
+                <select name="status" class="w-full px-3 py-1.5 rounded-md bg-[#0f0f0f] border border-[#222222] text-xs text-[#cccccc] focus:outline-none focus:border-[#00e599] transition">
                     <option value="">Status: All</option>
                     @foreach (\App\Enums\IncidentStatus::cases() as $statusCase)
                         <option value="{{ $statusCase->value }}" {{ request('status') === $statusCase->value ? 'selected' : '' }}>
-                            Status: {{ ucwords(strtolower(str_replace('_', ' ', $statusCase->value))) }}
+                            {{ ucwords(strtolower(str_replace('_', ' ', $statusCase->value))) }}
                         </option>
                     @endforeach
                 </select>
             </div>
 
-            <!-- Severity Filter Dropdown -->
-            <div class="w-full md:w-40">
-                <select name="severity" class="w-full px-3 py-1.5 rounded-md bg-[#0d1117] border border-[#30363d] text-sm text-[#e6edf3] focus:outline-none focus:border-[#58a6ff]">
+            <!-- Severity Filter -->
+            <div class="w-full sm:w-36">
+                <select name="severity" class="w-full px-3 py-1.5 rounded-md bg-[#0f0f0f] border border-[#222222] text-xs text-[#cccccc] focus:outline-none focus:border-[#00e599] transition">
                     <option value="">Severity: All</option>
                     <option value="critical" {{ request('severity') === 'critical' ? 'selected' : '' }}>Critical</option>
                     <option value="high" {{ request('severity') === 'high' ? 'selected' : '' }}>High</option>
@@ -94,128 +146,121 @@
                 </select>
             </div>
 
-            <!-- GitHub Green Button -->
-            <button type="submit" class="px-4 py-1.5 rounded-md bg-[#238636] hover:bg-[#2ea043] border border-[rgba(240,246,252,0.1)] text-white text-sm font-medium transition shrink-0">
+            <!-- Buttons -->
+            <button type="submit" class="px-4 py-1.5 rounded-md bg-[#181818] hover:bg-[#222222] border border-[#2a2a2a] text-white text-xs font-semibold transition shrink-0">
                 Filter
             </button>
 
             @if (request()->hasAny(['search', 'status', 'severity', 'repository']))
-                <a href="{{ route('incidents.index') }}" class="px-3 py-1.5 rounded-md bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-[#c9d1d9] text-sm font-medium transition text-center shrink-0">
+                <a href="{{ route('incidents.index') }}" class="px-3 py-1.5 rounded-md bg-transparent hover:bg-[#181818] text-[#8e8e93] hover:text-white text-xs font-medium transition text-center shrink-0 border border-transparent">
                     Clear
                 </a>
             @endif
         </form>
     </div>
 
-    <!-- GitHub Style Incident List (Like GitHub Issues / PRs) -->
-    <div class="rounded-md border border-[#30363d] bg-[#161b22] overflow-hidden">
-        <!-- List Header Bar -->
-        <div class="px-4 py-3 bg-[#161b22] border-b border-[#30363d] flex items-center justify-between text-xs text-[#848d97]">
-            <div class="flex items-center space-x-4">
-                <span class="font-semibold text-[#e6edf3]">
-                    {{ $incidents->total() }} total {{ Str::plural('incident', $incidents->total()) }}
-                </span>
-                @if (request()->filled('status'))
-                    <span>• Filtered by <span class="text-[#e6edf3]">{{ ucwords(str_replace('_', ' ', request('status'))) }}</span></span>
-                @endif
-            </div>
-            <div class="text-xs text-[#848d97]">
-                Sorted by most recent
-            </div>
-        </div>
+    <!-- Modern Neon Console Table -->
+    <div class="rounded-lg border border-[#1e1e1e] bg-[#0c0c0c] overflow-hidden shadow-sm">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <!-- Table Header -->
+                <thead class="bg-[#121212] border-b border-[#1e1e1e] text-[#777777] font-semibold uppercase tracking-wider text-[11px]">
+                    <tr>
+                        <th class="py-3 px-4">Incident</th>
+                        <th class="py-3 px-4">Title &amp; Vulnerability</th>
+                        <th class="py-3 px-4">Repository</th>
+                        <th class="py-3 px-4">Severity</th>
+                        <th class="py-3 px-4">Status</th>
+                        <th class="py-3 px-4">Created</th>
+                        <th class="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                </thead>
 
-        <!-- Incident Rows -->
-        <div class="divide-y divide-[#30363d]">
-            @forelse ($incidents as $incident)
-                @php
-                    $isAwaiting = strtoupper($incident->status?->value ?? (string) $incident->status) === 'AWAITING_APPROVAL';
-                    $isRemediated = strtoupper($incident->status?->value ?? (string) $incident->status) === 'REMEDIATED';
-                    $sev = strtolower($incident->severity?->value ?? (string) $incident->severity);
-                @endphp
-                <div class="p-4 hover:bg-[#1c2128] transition flex items-start justify-between gap-4">
-                    <div class="flex items-start space-x-3 flex-1 min-w-0">
-                        <!-- Leading Status Icon -->
-                        <div class="mt-0.5 shrink-0">
-                            @if ($isRemediated)
-                                <svg class="w-5 h-5 text-[#3fb950]" viewBox="0 0 16 16" fill="currentColor">
-                                    <path d="M8 16A8 8 0 1 1 8 0a8 8 0 0 1 0 16Zm3.78-9.72a.751.751 0 0 0-.018-1.042.751.751 0 0 0-1.042-.018L6.75 9.19 5.28 7.72a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042l2 2a.75.75 0 0 0 1.06 0Z"/>
-                                </svg>
-                            @elseif ($isAwaiting)
-                                <svg class="w-5 h-5 text-[#d2a8ff]" viewBox="0 0 16 16" fill="currentColor">
-                                    <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.5 5.396l2.323-2.323a.75.75 0 0 1 1.06 1.06L10.56 6.456l2.324 2.324a.75.75 0 1 1-1.06 1.06L9.5 7.518 7.177 9.84a.75.75 0 0 1-1.06-1.06L8.44 6.456 6.116 4.133a.75.75 0 0 1 1.06-1.06ZM3 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm0 9.5a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/>
-                                </svg>
-                            @else
-                                <svg class="w-5 h-5 text-[#58a6ff]" viewBox="0 0 16 16" fill="currentColor">
-                                    <path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/>
-                                    <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z"/>
-                                </svg>
-                            @endif
-                        </div>
-
-                        <!-- Main Content -->
-                        <div class="space-y-1 flex-1 min-w-0">
-                            <div class="flex items-center space-x-2 flex-wrap gap-y-1">
-                                <a href="{{ $isAwaiting ? route('incidents.approval', $incident) : route('incidents.show', $incident) }}" class="text-base font-semibold text-[#e6edf3] hover:text-[#58a6ff] transition">
-                                    {{ $incident->title }}
+                <!-- Table Body -->
+                <tbody class="divide-y divide-[#181818]">
+                    @forelse ($incidents as $incident)
+                        @php
+                            $isAwaiting = strtoupper($incident->status?->value ?? (string) $incident->status) === 'AWAITING_APPROVAL';
+                            $sev = strtolower($incident->severity?->value ?? (string) $incident->severity);
+                        @endphp
+                        <tr class="hover:bg-[#141414] transition group">
+                            <!-- Incident ID -->
+                            <td class="py-3.5 px-4 font-mono font-medium text-white whitespace-nowrap">
+                                <a href="{{ $isAwaiting ? route('incidents.approval', $incident) : route('incidents.show', $incident) }}" class="hover:text-[#00e599] transition">
+                                    {{ $incident->incident_number }}
                                 </a>
+                            </td>
 
-                                <!-- Severity Tag -->
-                                <span class="px-2 py-0.5 rounded-full text-xs font-medium border {{ match($sev) {
-                                    'critical' => 'bg-[#da3633]/15 text-[#f85149] border-[#f85149]/30',
-                                    'high' => 'bg-[#d29922]/15 text-[#e3b341] border-[#d29922]/30',
-                                    'medium' => 'bg-[#2f81f7]/15 text-[#58a6ff] border-[#2f81f7]/30',
-                                    default => 'bg-[#6e7681]/15 text-[#8b949e] border-[#6e7681]/30',
-                                } }}">
-                                    {{ ucfirst($sev) }}
+                            <!-- Title & CVE -->
+                            <td class="py-3.5 px-4 min-w-[280px]">
+                                <div class="space-y-1">
+                                    <a href="{{ $isAwaiting ? route('incidents.approval', $incident) : route('incidents.show', $incident) }}" class="font-medium text-white hover:text-[#00e599] transition line-clamp-1">
+                                        {{ $incident->title }}
+                                    </a>
+                                    <div class="flex items-center space-x-2 text-[11px] font-mono text-[#777777]">
+                                        <span class="text-[#00e599]">{{ $incident->cve_identifier }}</span>
+                                        <span>•</span>
+                                        <span>iteration {{ $incident->patch_iterations ?? 1 }}/3</span>
+                                    </div>
+                                </div>
+                            </td>
+
+                            <!-- Repository -->
+                            <td class="py-3.5 px-4 font-mono text-[#a1a1aa] whitespace-nowrap">
+                                {{ $incident->repository }}
+                            </td>
+
+                            <!-- Severity -->
+                            <td class="py-3.5 px-4 whitespace-nowrap">
+                                <span class="px-2 py-0.5 rounded text-[11px] font-mono uppercase font-semibold bg-[#00e599]/10 text-[#00e599] border border-[#00e599]/30">
+                                    {{ $sev }}
                                 </span>
+                            </td>
 
+                            <!-- Status -->
+                            <td class="py-3.5 px-4 whitespace-nowrap">
                                 <x-status-badge :status="$incident->status" size="sm" />
-                            </div>
+                            </td>
 
-                            <!-- Metadata Subline (like GitHub issues) -->
-                            <div class="text-xs text-[#848d97] flex items-center space-x-2 flex-wrap gap-y-1">
-                                <span class="font-mono text-[#c9d1d9] font-medium">{{ $incident->incident_number }}</span>
-                                <span>•</span>
-                                <span class="font-mono text-[#58a6ff]">{{ $incident->cve_identifier }}</span>
-                                <span>•</span>
-                                <span>{{ $incident->repository }}</span>
-                                <span>•</span>
-                                <span>opened {{ $incident->created_at?->diffForHumans() ?? 'recently' }}</span>
-                                <span>•</span>
-                                <span>iteration {{ $incident->patch_iterations ?? 1 }}/3</span>
-                            </div>
-                        </div>
-                    </div>
+                            <!-- Created -->
+                            <td class="py-3.5 px-4 text-[#777777] font-mono text-[11px] whitespace-nowrap">
+                                {{ $incident->created_at?->diffForHumans() ?? 'recently' }}
+                            </td>
 
-                    <!-- Right Actions -->
-                    <div class="shrink-0 flex items-center space-x-2">
-                        @if ($isAwaiting)
-                            <a href="{{ route('incidents.approval', $incident) }}" class="px-3 py-1.5 rounded-md bg-[#238636] hover:bg-[#2ea043] border border-[rgba(240,246,252,0.1)] text-white text-xs font-medium transition flex items-center space-x-1">
-                                <span>Review &amp; Approve</span>
-                                <span>&rarr;</span>
-                            </a>
-                        @else
-                            <a href="{{ route('incidents.show', $incident) }}" class="px-3 py-1.5 rounded-md bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-[#c9d1d9] hover:text-white text-xs font-medium transition">
-                                View details
-                            </a>
-                        @endif
-                    </div>
-                </div>
-            @empty
-                <div class="p-12 text-center text-[#848d97]">
-                    <svg class="w-10 h-10 mx-auto text-[#6e7681] mb-3" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/>
-                        <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z"/>
-                    </svg>
-                    <p class="text-base font-semibold text-[#e6edf3]">No incidents found</p>
-                    <p class="text-xs text-[#848d97] mt-1">Try clearing your search query or selecting a different filter.</p>
-                </div>
-            @endforelse
+                            <!-- Actions -->
+                            <td class="py-3.5 px-4 text-right whitespace-nowrap">
+                                @if ($isAwaiting)
+                                    <a href="{{ route('incidents.approval', $incident) }}" class="inline-flex items-center space-x-1 px-3 py-1 rounded bg-[#00e599] hover:bg-[#00c784] text-black font-semibold text-xs transition shadow-[0_0_10px_rgba(0,229,153,0.25)]">
+                                        <span>Review &amp; Approve</span>
+                                        <span>&rarr;</span>
+                                    </a>
+                                @else
+                                    <a href="{{ route('incidents.show', $incident) }}" class="inline-flex items-center px-3 py-1 rounded bg-[#161616] hover:bg-[#202020] border border-[#262626] text-[#cccccc] hover:text-white text-xs font-medium transition">
+                                        View details
+                                    </a>
+                                @endif
+                            </td>
+                        </tr>
+                    @empty
+                        <tr>
+                            <td colspan="7" class="py-12 px-4 text-center text-[#777777]">
+                                <div class="max-w-sm mx-auto space-y-2">
+                                    <svg class="w-8 h-8 mx-auto text-[#444444]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <p class="font-semibold text-sm text-white">No incidents found</p>
+                                    <p class="text-xs">No active or historical security incidents match your current filter parameters.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
         </div>
 
         <!-- Pagination Bar -->
         @if ($incidents->hasPages())
-            <div class="p-3 bg-[#161b22] border-t border-[#30363d]">
+            <div class="p-3 bg-[#101010] border-t border-[#1e1e1e]">
                 {{ $incidents->links() }}
             </div>
         @endif
